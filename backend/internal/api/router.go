@@ -11,7 +11,7 @@ import (
 	"github.com/chrisapos3/mmo-rpg/internal/service"
 )
 
-func NewRouter(authSvc *service.AuthService, onboardingSvc *service.OnboardingService) http.Handler {
+func NewRouter(authSvc *service.AuthService, onboardingSvc *service.OnboardingService, githubSvc *service.GitHubService, signalSvc *service.SignalService, frontendURL string) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(chimw.Logger)
@@ -21,6 +21,8 @@ func NewRouter(authSvc *service.AuthService, onboardingSvc *service.OnboardingSe
 
 	auth := handler.NewAuthHandler(authSvc)
 	onboarding := handler.NewOnboardingHandler(onboardingSvc)
+	github := handler.NewGitHubHandler(githubSvc, frontendURL)
+	signal := handler.NewSignalHandler(signalSvc)
 	authMW := middleware.Auth(authSvc)
 
 	r.Get("/health", handler.Health)
@@ -42,6 +44,24 @@ func NewRouter(authSvc *service.AuthService, onboardingSvc *service.OnboardingSe
 			r.Get("/cv/status", onboarding.CVStatus)
 			r.Post("/build", onboarding.GenerateBuild)
 			r.Get("/build", onboarding.GetBuild)
+		})
+
+		r.Route("/signal", func(r chi.Router) {
+			r.Use(authMW)
+			r.Get("/scores", signal.GetScores)
+			r.Get("/evidence", signal.GetEvidence)
+		})
+
+		r.Route("/github", func(r chi.Router) {
+			// Callback is unauthenticated — browser redirect from GitHub
+			r.Get("/callback", github.Callback)
+
+			r.Group(func(r chi.Router) {
+				r.Use(authMW)
+				r.Get("/authorize", github.Authorize)
+				r.Get("/status", github.Status)
+				r.Post("/sync", github.Sync)
+			})
 		})
 	})
 

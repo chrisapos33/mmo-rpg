@@ -73,3 +73,57 @@ export interface CVUploadStatus {
   created_at: string
   processed_at: string | null
 }
+
+// ─── GitHub ──────────────────────────────────────────────────────────────────
+
+export interface GitHubConnection {
+  id: number
+  user_id: number
+  github_username: string
+  github_user_id: number
+  avatar_url: string | null
+  repo_count: number
+  star_count: number
+  followers: number
+  top_languages: string[]
+  contribution_score: number
+  synced_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface GitHubStatusResponse {
+  connected: boolean
+  connection: GitHubConnection | null
+}
+
+// ─── Signal ──────────────────────────────────────────────────────────────────
+
+export type SignalDimension = 'builder' | 'thinker' | 'executor' | 'collaborator' | 'specialist' | 'trusted'
+
+export interface UserSignalScore {
+  user_id: number
+  builder_score: number
+  thinker_score: number
+  executor_score: number
+  collaborator_score: number
+  specialist_score: number
+  trusted_score: number
+  total_signal: number
+  updated_at: string
+}
+
+export interface EvidenceItem {
+  id: number
+  user_id: number
+  source_type: string
+  source_key: string
+  artifact_url: string | null
+  title: string
+  description: string | null
+  metadata: Record<string, unknown> | null
+  verification_status: string
+  verification_confidence: number
+  created_at: string
+  updated_at: string
+}

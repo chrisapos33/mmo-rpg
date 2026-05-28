@@ -51,13 +51,17 @@ func main() {
 	userRepo := repository.NewUserRepo(db)
 	cvRepo := repository.NewCVRepo(db)
 	profileRepo := repository.NewProfileRepo(db)
+	ghRepo := repository.NewGitHubRepo(db)
+	signalRepo := repository.NewSignalRepo(db)
 
 	aiClient := ai.NewClient(cfg.AnthropicKey)
 
 	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
 	onboardingSvc := service.NewOnboardingService(cvRepo, profileRepo, aiClient, cfg.UploadDir)
+	signalSvc := service.NewSignalService(signalRepo)
+	githubSvc := service.NewGitHubService(ghRepo, signalSvc, cfg.GitHubClientID, cfg.GitHubClientSecret, cfg.GitHubRedirectURL, cfg.FrontendURL)
 
-	router := api.NewRouter(authSvc, onboardingSvc)
+	router := api.NewRouter(authSvc, onboardingSvc, githubSvc, signalSvc, cfg.FrontendURL)
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
 	log.Printf("server listening on %s", addr)

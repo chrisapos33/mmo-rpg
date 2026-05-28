@@ -6,20 +6,28 @@ import (
 )
 
 type Config struct {
-	DatabaseURL  string
-	JWTSecret    string
-	Port         string
-	AnthropicKey string
-	UploadDir    string
+	DatabaseURL        string
+	JWTSecret          string
+	Port               string
+	AnthropicKey       string
+	UploadDir          string
+	GitHubClientID     string
+	GitHubClientSecret string
+	GitHubRedirectURL  string
+	FrontendURL        string
 }
 
 func Load() (*Config, error) {
 	cfg := &Config{
-		DatabaseURL:  os.Getenv("DATABASE_URL"),
-		JWTSecret:    os.Getenv("JWT_SECRET"),
-		Port:         os.Getenv("PORT"),
-		AnthropicKey: os.Getenv("ANTHROPIC_API_KEY"),
-		UploadDir:    os.Getenv("UPLOAD_DIR"),
+		DatabaseURL:        os.Getenv("DATABASE_URL"),
+		JWTSecret:          os.Getenv("JWT_SECRET"),
+		Port:               os.Getenv("PORT"),
+		AnthropicKey:       os.Getenv("ANTHROPIC_API_KEY"),
+		UploadDir:          os.Getenv("UPLOAD_DIR"),
+		GitHubClientID:     os.Getenv("GITHUB_CLIENT_ID"),
+		GitHubClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),
+		GitHubRedirectURL:  os.Getenv("GITHUB_REDIRECT_URL"),
+		FrontendURL:        os.Getenv("FRONTEND_URL"),
 	}
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")

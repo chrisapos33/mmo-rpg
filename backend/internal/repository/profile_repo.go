@@ -50,6 +50,15 @@ func (r *ProfileRepo) UpsertBuild(ctx context.Context, userID int64, build *doma
 	return &p, err
 }
 
+// UpdateSignalScore recalculates and stores the signal score for a user's profile.
+func (r *ProfileRepo) UpdateSignalScore(ctx context.Context, userID int64, score int) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE profiles SET signal_score = $1, updated_at = NOW() WHERE user_id = $2`,
+		score, userID,
+	)
+	return err
+}
+
 // FindByUserID returns the profile for a user, or ErrNotFound.
 func (r *ProfileRepo) FindByUserID(ctx context.Context, userID int64) (*domain.Profile, error) {
 	var p domain.Profile
