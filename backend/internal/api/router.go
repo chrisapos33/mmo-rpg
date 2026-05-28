@@ -11,7 +11,7 @@ import (
 	"github.com/chrisapos3/mmo-rpg/internal/service"
 )
 
-func NewRouter(authSvc *service.AuthService) http.Handler {
+func NewRouter(authSvc *service.AuthService, onboardingSvc *service.OnboardingService) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(chimw.Logger)
@@ -20,6 +20,8 @@ func NewRouter(authSvc *service.AuthService) http.Handler {
 	r.Use(cors)
 
 	auth := handler.NewAuthHandler(authSvc)
+	onboarding := handler.NewOnboardingHandler(onboardingSvc)
+	authMW := middleware.Auth(authSvc)
 
 	r.Get("/health", handler.Health)
 
@@ -29,9 +31,15 @@ func NewRouter(authSvc *service.AuthService) http.Handler {
 			r.Post("/login", auth.Login)
 
 			r.Group(func(r chi.Router) {
-				r.Use(middleware.Auth(authSvc))
+				r.Use(authMW)
 				r.Get("/me", auth.Me)
 			})
+		})
+
+		r.Route("/onboarding", func(r chi.Router) {
+			r.Use(authMW)
+			r.Post("/cv", onboarding.UploadCV)
+			r.Get("/cv/status", onboarding.CVStatus)
 		})
 	})
 

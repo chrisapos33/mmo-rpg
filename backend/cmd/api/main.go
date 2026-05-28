@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	_ "github.com/lib/pq"
 	"github.com/jmoiron/sqlx"
 	"github.com/pressly/goose/v3"
 
+	"github.com/chrisapos3/mmo-rpg/internal/ai"
 	"github.com/chrisapos3/mmo-rpg/internal/api"
 	"github.com/chrisapos3/mmo-rpg/internal/config"
 	"github.com/chrisapos3/mmo-rpg/internal/repository"
@@ -20,6 +22,10 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config: %v", err)
+	}
+
+	if err := os.MkdirAll(cfg.UploadDir, 0o755); err != nil {
+		log.Fatalf("upload dir: %v", err)
 	}
 
 	db, err := sqlx.Open("postgres", cfg.DatabaseURL)
@@ -43,8 +49,14 @@ func main() {
 	log.Println("migrations applied")
 
 	userRepo := repository.NewUserRepo(db)
+	cvRepo := repository.NewCVRepo(db)
+
+	aiClient := ai.NewClient(cfg.AnthropicKey)
+
 	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
-	router := api.NewRouter(authSvc)
+	onboardingSvc := service.NewOnboardingService(cvRepo, aiClient, cfg.UploadDir)
+
+	router := api.NewRouter(authSvc, onboardingSvc)
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
 	log.Printf("server listening on %s", addr)
