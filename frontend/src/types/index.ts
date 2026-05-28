@@ -19,6 +19,8 @@ export interface Profile {
   xp: number
   is_published: boolean
   onboarding_step: string
+  strengths: string[]
+  growth_paths: string[]
   created_at: string
   updated_at: string
 }

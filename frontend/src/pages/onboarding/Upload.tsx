@@ -239,8 +239,8 @@ export function Upload() {
               )}
             </div>
 
-            <Button onClick={() => navigate('/hub')} className="w-full py-3">
-              Continue →
+            <Button onClick={() => navigate('/onboarding/reveal')} className="w-full py-3">
+              Continue to build reveal →
             </Button>
 
             <p className="text-xs text-ink-600 text-center">

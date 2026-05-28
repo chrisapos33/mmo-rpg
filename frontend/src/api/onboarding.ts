@@ -1,6 +1,6 @@
 import { useAuthStore } from '../store/auth'
 import { api } from './client'
-import type { CVUploadStatus } from '../types'
+import type { CVUploadStatus, Profile } from '../types'
 
 // uploadCV uses FormData — cannot go through the JSON api client
 export async function uploadCV(file: File): Promise<CVUploadStatus> {
@@ -21,4 +21,14 @@ export async function uploadCV(file: File): Promise<CVUploadStatus> {
 
 export function getCVStatus(): Promise<CVUploadStatus> {
   return api.get<CVUploadStatus>('/onboarding/cv/status')
+}
+
+// generateBuild is synchronous — blocks until Claude returns (5-15s).
+export function generateBuild(): Promise<Profile> {
+  return api.post<Profile>('/onboarding/build', {})
+}
+
+// getBuild returns the profile if a build already exists, throws ApiError 404 if not.
+export function getBuild(): Promise<Profile> {
+  return api.get<Profile>('/onboarding/build')
 }
