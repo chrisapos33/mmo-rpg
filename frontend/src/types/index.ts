@@ -31,3 +31,43 @@ export interface AuthResponse {
 export interface ApiError {
   error: string
 }
+
+// ─── CV / Onboarding ─────────────────────────────────────────────────────────
+
+export interface CVExperience {
+  company: string
+  title: string
+  start_date: string
+  end_date: string | null
+  is_current: boolean
+  description: string | null
+}
+
+export interface CVEducation {
+  institution: string
+  degree: string | null
+  field: string | null
+  year: string | null
+}
+
+export interface CVData {
+  full_name: string
+  email: string | null
+  location: string | null
+  summary: string | null
+  experiences: CVExperience[]
+  skills: string[]
+  education: CVEducation[]
+  languages: string[]
+  inferred_specializations: string[]
+}
+
+export interface CVUploadStatus {
+  id: number
+  status: 'processing' | 'done' | 'failed'
+  original_name: string
+  extracted_data: CVData | null
+  error_message: string | null
+  created_at: string
+  processed_at: string | null
+}
