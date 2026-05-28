@@ -175,6 +175,10 @@ export function Hub() {
           <span className="text-ink-50">◈</span> Hunter HQ
         </span>
         <div className="flex items-center gap-4">
+          <Link to="/explore" className="text-xs text-ink-500 hover:text-ink-300 transition-colors">
+            Explore
+          </Link>
+          <span className="text-ink-700">|</span>
           <span className="text-sm text-ink-400">{user?.email}</span>
           <Button variant="ghost" onClick={handleLogout} className="text-xs px-4 py-2">
             Sign out

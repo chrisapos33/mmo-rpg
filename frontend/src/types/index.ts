@@ -113,6 +113,26 @@ export interface UserSignalScore {
   updated_at: string
 }
 
+// ─── Explore ─────────────────────────────────────────────────────────────────
+
+export interface ExploreEntry {
+  user_id: number
+  class: string | null
+  subclass: string | null
+  headline: string | null
+  total_signal: number
+  github_username: string | null
+  top_languages: string[]
+  updated_at: string
+}
+
+export interface ExploreResponse {
+  entries: ExploreEntry[]
+  classes: string[]
+  limit: number
+  offset: number
+}
+
 export interface PublicProfileResponse {
   profile: Profile
   signal: UserSignalScore | null

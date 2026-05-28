@@ -58,12 +58,17 @@ export function PublicProfile() {
         <Link to="/" className="text-gold-400 text-xs tracking-[0.35em] uppercase hover:text-gold-300 transition-colors">
           ◈ Signal
         </Link>
-        <Link
-          to="/join"
-          className="text-xs border border-void-600 px-4 py-2 text-ink-300 hover:border-gold-400 hover:text-gold-300 transition-colors"
-        >
-          Build yours →
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link to="/explore" className="text-xs text-ink-500 hover:text-ink-300 transition-colors">
+            Explore
+          </Link>
+          <Link
+            to="/join"
+            className="text-xs border border-void-600 px-4 py-2 text-ink-300 hover:border-gold-400 hover:text-gold-300 transition-colors"
+          >
+            Build yours →
+          </Link>
+        </div>
       </header>
 
       {/* Hero */}

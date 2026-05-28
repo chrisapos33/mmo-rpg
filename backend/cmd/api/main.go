@@ -63,8 +63,9 @@ func main() {
 	githubSvc := service.NewGitHubService(ghRepo, signalSvc, cfg.GitHubClientID, cfg.GitHubClientSecret, cfg.GitHubRedirectURL, cfg.FrontendURL)
 
 	profileH := handler.NewProfileHandler(profileRepo, signalRepo, ghRepo)
+	exploreH := handler.NewExploreHandler(profileRepo)
 
-	router := api.NewRouter(authSvc, onboardingSvc, githubSvc, signalSvc, profileH, cfg.FrontendURL)
+	router := api.NewRouter(authSvc, onboardingSvc, githubSvc, signalSvc, profileH, exploreH, cfg.FrontendURL)
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
 	log.Printf("server listening on %s", addr)

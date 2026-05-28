@@ -11,7 +11,7 @@ import (
 	"github.com/chrisapos3/mmo-rpg/internal/service"
 )
 
-func NewRouter(authSvc *service.AuthService, onboardingSvc *service.OnboardingService, githubSvc *service.GitHubService, signalSvc *service.SignalService, profileH *handler.ProfileHandler, frontendURL string) http.Handler {
+func NewRouter(authSvc *service.AuthService, onboardingSvc *service.OnboardingService, githubSvc *service.GitHubService, signalSvc *service.SignalService, profileH *handler.ProfileHandler, exploreH *handler.ExploreHandler, frontendURL string) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(chimw.Logger)
@@ -53,8 +53,9 @@ func NewRouter(authSvc *service.AuthService, onboardingSvc *service.OnboardingSe
 			r.Get("/evidence", signal.GetEvidence)
 		})
 
-		// Public profile — no auth
+		// Public endpoints — no auth
 		r.Get("/p/{userID}", profileH.GetPublic)
+		r.Get("/explore", exploreH.List)
 
 		r.Route("/profile", func(r chi.Router) {
 			r.Use(authMW)
