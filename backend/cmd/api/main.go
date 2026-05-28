@@ -50,11 +50,12 @@ func main() {
 
 	userRepo := repository.NewUserRepo(db)
 	cvRepo := repository.NewCVRepo(db)
+	profileRepo := repository.NewProfileRepo(db)
 
 	aiClient := ai.NewClient(cfg.AnthropicKey)
 
 	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
-	onboardingSvc := service.NewOnboardingService(cvRepo, aiClient, cfg.UploadDir)
+	onboardingSvc := service.NewOnboardingService(cvRepo, profileRepo, aiClient, cfg.UploadDir)
 
 	router := api.NewRouter(authSvc, onboardingSvc)
 

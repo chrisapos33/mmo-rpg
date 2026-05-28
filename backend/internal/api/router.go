@@ -40,6 +40,8 @@ func NewRouter(authSvc *service.AuthService, onboardingSvc *service.OnboardingSe
 			r.Use(authMW)
 			r.Post("/cv", onboarding.UploadCV)
 			r.Get("/cv/status", onboarding.CVStatus)
+			r.Post("/build", onboarding.GenerateBuild)
+			r.Get("/build", onboarding.GetBuild)
 		})
 	})
 
