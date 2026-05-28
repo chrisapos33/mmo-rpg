@@ -12,6 +12,7 @@ import (
 
 	"github.com/chrisapos3/mmo-rpg/internal/ai"
 	"github.com/chrisapos3/mmo-rpg/internal/api"
+	"github.com/chrisapos3/mmo-rpg/internal/api/handler"
 	"github.com/chrisapos3/mmo-rpg/internal/config"
 	"github.com/chrisapos3/mmo-rpg/internal/repository"
 	"github.com/chrisapos3/mmo-rpg/internal/service"
@@ -61,7 +62,9 @@ func main() {
 	signalSvc := service.NewSignalService(signalRepo)
 	githubSvc := service.NewGitHubService(ghRepo, signalSvc, cfg.GitHubClientID, cfg.GitHubClientSecret, cfg.GitHubRedirectURL, cfg.FrontendURL)
 
-	router := api.NewRouter(authSvc, onboardingSvc, githubSvc, signalSvc, cfg.FrontendURL)
+	profileH := handler.NewProfileHandler(profileRepo, signalRepo, ghRepo)
+
+	router := api.NewRouter(authSvc, onboardingSvc, githubSvc, signalSvc, profileH, cfg.FrontendURL)
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
 	log.Printf("server listening on %s", addr)

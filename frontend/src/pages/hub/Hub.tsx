@@ -6,6 +6,7 @@ import { SignalRadar } from '../../components/signal/SignalRadar'
 import { getGitHubAuthorizeUrl, getGitHubStatus, syncGitHub } from '../../api/github'
 import { getSignalScores } from '../../api/signal'
 import { getBuild } from '../../api/onboarding'
+import { publishProfile } from '../../api/profile'
 import { ApiError } from '../../api/client'
 import type { GitHubConnection, UserSignalScore, Profile } from '../../types'
 
@@ -72,6 +73,8 @@ export function Hub() {
 
   const [signal, setSignal] = useState<UserSignalScore | null>(null)
   const [build, setBuild] = useState<Profile | null>(null)
+  const [publishing, setPublishing] = useState(false)
+  const [publishError, setPublishError] = useState<string | null>(null)
 
   function handleLogout() {
     logout()
@@ -143,6 +146,21 @@ export function Hub() {
 
   const hasBuild = build !== null
 
+  async function handlePublish() {
+    setPublishing(true)
+    setPublishError(null)
+    try {
+      await publishProfile()
+      // Refetch build to get updated is_published
+      const updated = await getBuild()
+      setBuild(updated)
+    } catch {
+      setPublishError('Publish failed. Please try again.')
+    } finally {
+      setPublishing(false)
+    }
+  }
+
   const zeroSignal: UserSignalScore = {
     user_id: user?.id ?? 0,
     builder_score: 0, thinker_score: 0, executor_score: 0,
@@ -183,7 +201,14 @@ export function Hub() {
         )}
 
         {/* Character build panel */}
-        {build && <BuildPanel profile={build} />}
+        {build && (
+          <BuildPanel
+            profile={build}
+            onPublish={handlePublish}
+            publishing={publishing}
+            publishError={publishError}
+          />
+        )}
 
         {/* Signal section */}
         <section className="border border-void-700 bg-void-900">
@@ -293,7 +318,23 @@ export function Hub() {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function BuildPanel({ profile }: { profile: Profile }) {
+function BuildPanel({
+  profile,
+  onPublish,
+  publishing,
+  publishError,
+}: {
+  profile: Profile
+  onPublish: () => void
+  publishing: boolean
+  publishError: string | null
+}) {
+  const profileUrl = `/p/${profile.user_id}`
+
+  function copyUrl() {
+    navigator.clipboard.writeText(window.location.origin + profileUrl)
+  }
+
   return (
     <section className="border border-void-700 bg-void-900">
       <div className="border-b border-void-700 px-6 py-4 flex items-center justify-between">
@@ -332,7 +373,7 @@ function BuildPanel({ profile }: { profile: Profile }) {
         )}
 
         {/* Strengths + growth paths */}
-        <div className="grid sm:grid-cols-2 gap-6">
+        <div className="grid sm:grid-cols-2 gap-6 mb-8">
           {(profile.strengths ?? []).length > 0 && (
             <div>
               <p className="text-[10px] text-gold-400 tracking-[0.3em] uppercase mb-3">Strengths</p>
@@ -358,6 +399,55 @@ function BuildPanel({ profile }: { profile: Profile }) {
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+        </div>
+
+        {/* Publish / share */}
+        <div className="border-t border-void-700 pt-6">
+          {publishError && (
+            <p className="text-red-400 text-xs mb-3">{publishError}</p>
+          )}
+          {profile.is_published ? (
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+              <div className="flex-1">
+                <p className="text-[10px] text-signal-400 tracking-widest uppercase mb-1">Profile published</p>
+                <p className="text-xs text-ink-500 font-mono">
+                  {window.location.origin}{profileUrl}
+                </p>
+              </div>
+              <div className="flex items-center gap-3 flex-shrink-0">
+                <button
+                  onClick={copyUrl}
+                  className="text-xs border border-void-600 px-4 py-2 text-ink-300 hover:border-gold-400 hover:text-gold-300 transition-colors"
+                >
+                  Copy link
+                </button>
+                <Link
+                  to={profileUrl}
+                  target="_blank"
+                  className="text-xs text-ink-600 hover:text-ink-400 transition-colors"
+                >
+                  View ↗
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <p className="text-sm text-ink-300 mb-0.5">Share your signal profile</p>
+                <p className="text-xs text-ink-600">
+                  Make your character build and signal publicly accessible via a link.
+                </p>
+              </div>
+              <Button
+                onClick={onPublish}
+                disabled={publishing}
+                loading={publishing}
+                className="flex-shrink-0 px-6 py-2 text-sm whitespace-nowrap"
+              >
+                Publish profile
+              </Button>
             </div>
           )}
         </div>

@@ -113,6 +113,12 @@ export interface UserSignalScore {
   updated_at: string
 }
 
+export interface PublicProfileResponse {
+  profile: Profile
+  signal: UserSignalScore | null
+  github: GitHubConnection | null
+}
+
 export interface EvidenceItem {
   id: number
   user_id: number

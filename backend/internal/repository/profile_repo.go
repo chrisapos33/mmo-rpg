@@ -59,6 +59,38 @@ func (r *ProfileRepo) UpdateSignalScore(ctx context.Context, userID int64, score
 	return err
 }
 
+// Publish sets is_published = true on a user's profile.
+func (r *ProfileRepo) Publish(ctx context.Context, userID int64) error {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE profiles SET is_published = true, updated_at = NOW() WHERE user_id = $1`,
+		userID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// FindPublicByUserID returns a published profile, or ErrNotFound.
+func (r *ProfileRepo) FindPublicByUserID(ctx context.Context, userID int64) (*domain.Profile, error) {
+	var p domain.Profile
+	err := r.db.QueryRowxContext(ctx, `
+		SELECT id, user_id, username, display_name, class, subclass, headline, summary,
+		       avatar_url, signal_score, xp, is_published, onboarding_step,
+		       strengths, growth_paths, created_at, updated_at
+		FROM profiles
+		WHERE user_id = $1 AND is_published = true`,
+		userID,
+	).StructScan(&p)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return &p, err
+}
+
 // FindByUserID returns the profile for a user, or ErrNotFound.
 func (r *ProfileRepo) FindByUserID(ctx context.Context, userID int64) (*domain.Profile, error) {
 	var p domain.Profile
