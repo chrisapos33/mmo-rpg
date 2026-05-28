@@ -5,7 +5,9 @@ import { Button } from '../../components/ui/Button'
 import { SignalRadar } from '../../components/signal/SignalRadar'
 import { getGitHubAuthorizeUrl, getGitHubStatus, syncGitHub } from '../../api/github'
 import { getSignalScores } from '../../api/signal'
-import type { GitHubConnection, UserSignalScore } from '../../types'
+import { getBuild } from '../../api/onboarding'
+import { ApiError } from '../../api/client'
+import type { GitHubConnection, UserSignalScore, Profile } from '../../types'
 
 // Static quest board — dimension-linked progression suggestions.
 // These will become dynamic in a later phase.
@@ -69,14 +71,21 @@ export function Hub() {
   const [ghJustConnected, setGhJustConnected] = useState(false)
 
   const [signal, setSignal] = useState<UserSignalScore | null>(null)
+  const [build, setBuild] = useState<Profile | null>(null)
 
   function handleLogout() {
     logout()
     navigate('/login')
   }
 
-  // Load GitHub status + signal scores on mount
+  // Load build, GitHub status, and signal scores on mount
   useEffect(() => {
+    getBuild()
+      .then(setBuild)
+      .catch(err => {
+        if (!(err instanceof ApiError && err.status === 404)) console.error(err)
+      })
+
     getGitHubStatus()
       .then(res => setGhConn(res.connection))
       .catch(() => setGhConn(null))
@@ -132,7 +141,7 @@ export function Hub() {
     }
   }
 
-  const hasBuild = false // dynamic in Phase 5
+  const hasBuild = build !== null
 
   const zeroSignal: UserSignalScore = {
     user_id: user?.id ?? 0,
@@ -172,6 +181,9 @@ export function Hub() {
             </Link>
           </div>
         )}
+
+        {/* Character build panel */}
+        {build && <BuildPanel profile={build} />}
 
         {/* Signal section */}
         <section className="border border-void-700 bg-void-900">
@@ -280,6 +292,79 @@ export function Hub() {
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+
+function BuildPanel({ profile }: { profile: Profile }) {
+  return (
+    <section className="border border-void-700 bg-void-900">
+      <div className="border-b border-void-700 px-6 py-4 flex items-center justify-between">
+        <span className="text-xs text-gold-400 tracking-[0.25em] uppercase">Character Build</span>
+        <Link
+          to="/onboarding/reveal"
+          className="text-xs text-ink-600 hover:text-ink-400 transition-colors"
+        >
+          Rebuild →
+        </Link>
+      </div>
+
+      <div className="p-6">
+        {/* Class + subclass */}
+        <div className="mb-6">
+          <h2 className="text-4xl font-black tracking-tight text-gold-400 leading-none">
+            {profile.class}
+          </h2>
+          <p className="mt-1.5 text-sm text-ink-400 tracking-[0.2em] uppercase">
+            {profile.subclass}
+          </p>
+        </div>
+
+        {/* Headline */}
+        {profile.headline && (
+          <p className="text-sm text-ink-300 italic border-l-2 border-gold-400/30 pl-4 mb-6 leading-relaxed">
+            &ldquo;{profile.headline}&rdquo;
+          </p>
+        )}
+
+        {/* Summary */}
+        {profile.summary && (
+          <p className="text-sm text-ink-500 leading-relaxed mb-6">
+            {profile.summary}
+          </p>
+        )}
+
+        {/* Strengths + growth paths */}
+        <div className="grid sm:grid-cols-2 gap-6">
+          {(profile.strengths ?? []).length > 0 && (
+            <div>
+              <p className="text-[10px] text-gold-400 tracking-[0.3em] uppercase mb-3">Strengths</p>
+              <ul className="space-y-1.5">
+                {profile.strengths.map((s, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-ink-300">
+                    <span className="text-gold-400 mt-0.5 flex-shrink-0 text-xs">◆</span>
+                    {s}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {(profile.growth_paths ?? []).length > 0 && (
+            <div>
+              <p className="text-[10px] text-gold-400 tracking-[0.3em] uppercase mb-3">Growth Path</p>
+              <ul className="space-y-1.5">
+                {profile.growth_paths.map((g, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-ink-400">
+                    <span className="text-ink-600 mt-0.5 flex-shrink-0">→</span>
+                    {g}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
 
 function GitHubConnectPrompt({ onConnect, connecting }: { onConnect: () => void; connecting: boolean }) {
   return (
