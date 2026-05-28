@@ -124,6 +124,36 @@ func (r *SignalRepo) GetScores(ctx context.Context, userID int64) (*domain.UserS
 	return &score, err
 }
 
+// DeleteEvidence removes an evidence item (verifying ownership) along with its
+// signal_events in a single transaction. Caller must recompute scores afterward.
+func (r *SignalRepo) DeleteEvidence(ctx context.Context, userID, evidenceID int64) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Delete signal_events first (FK is SET NULL, so we must do this explicitly).
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM signal_events WHERE evidence_item_id = $1 AND user_id = $2`,
+		evidenceID, userID,
+	); err != nil {
+		return err
+	}
+
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM evidence_items WHERE id = $1 AND user_id = $2`,
+		evidenceID, userID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
+}
+
 // ListEvidence returns all evidence items for a user, newest first.
 func (r *SignalRepo) ListEvidence(ctx context.Context, userID int64) ([]*domain.EvidenceItem, error) {
 	var items []*domain.EvidenceItem

@@ -6,11 +6,23 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net/http"
+	"time"
 
 	gh "github.com/chrisapos3/mmo-rpg/internal/github"
 	"github.com/chrisapos3/mmo-rpg/internal/domain"
 	"github.com/chrisapos3/mmo-rpg/internal/repository"
 )
+
+var urlVerifyClient = &http.Client{
+	Timeout: 6 * time.Second,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return http.ErrUseLastResponse
+		}
+		return nil
+	},
+}
 
 type SignalService struct {
 	signalRepo *repository.SignalRepo
@@ -33,6 +45,58 @@ func (s *SignalService) GetScores(ctx context.Context, userID int64) (*domain.Us
 // GetEvidence returns all evidence items for a user.
 func (s *SignalService) GetEvidence(ctx context.Context, userID int64) ([]*domain.EvidenceItem, error) {
 	return s.signalRepo.ListEvidence(ctx, userID)
+}
+
+// IngestManual adds a user-submitted evidence item, verifies its URL, assigns signal
+// events based on source_type, and recomputes scores. Returns the saved evidence item.
+func (s *SignalService) IngestManual(ctx context.Context, userID int64, item *domain.EvidenceItem) (*domain.EvidenceItem, error) {
+	// URL verification — HEAD request with timeout.
+	if item.ArtifactURL != nil && *item.ArtifactURL != "" {
+		if verifyURL(*item.ArtifactURL) {
+			item.VerificationStatus = domain.VerifURLVerified
+			item.VerificationConfidence = 0.60
+		} else {
+			item.VerificationStatus = domain.VerifUnverified
+			item.VerificationConfidence = 0.20
+		}
+	}
+
+	// Use URL as source_key so the same URL can't be added twice.
+	if item.ArtifactURL != nil {
+		item.SourceKey = *item.ArtifactURL
+	}
+
+	saved, err := s.signalRepo.UpsertEvidence(ctx, item)
+	if err != nil {
+		return nil, fmt.Errorf("upserting evidence: %w", err)
+	}
+
+	// Only award signal for verified evidence.
+	if saved.VerificationStatus != domain.VerifUnverified {
+		events := computeManualEvents(userID, saved.ID, saved.SourceType, saved.VerificationConfidence)
+		if len(events) > 0 {
+			if err := s.signalRepo.ReplaceSignalEvents(ctx, saved.ID, events); err != nil {
+				log.Printf("signal [user:%d]: replace events failed: %v", userID, err)
+			} else {
+				if _, err := s.signalRepo.RecomputeScores(ctx, userID); err != nil {
+					log.Printf("signal [user:%d]: recompute failed: %v", userID, err)
+				}
+			}
+		}
+	}
+
+	return saved, nil
+}
+
+// RemoveEvidence deletes an evidence item (must belong to userID) and recomputes scores.
+func (s *SignalService) RemoveEvidence(ctx context.Context, userID, evidenceID int64) error {
+	if err := s.signalRepo.DeleteEvidence(ctx, userID, evidenceID); err != nil {
+		return err
+	}
+	if _, err := s.signalRepo.RecomputeScores(ctx, userID); err != nil {
+		log.Printf("signal [user:%d]: recompute after delete failed: %v", userID, err)
+	}
+	return nil
 }
 
 // IngestGitHub converts GitHub stats into evidence + signal events and recomputes scores.
@@ -155,6 +219,71 @@ func computeGitHubEvents(userID int64, evidenceID int64, stats *gh.Stats, confid
 		events = append(events, ev)
 	}
 	return events
+}
+
+// computeManualEvents maps a source_type to signal dimension specs.
+func computeManualEvents(userID, evidenceID int64, sourceType string, confidence float64) []*domain.SignalEvent {
+	// Each source_type awards points to specific dimensions.
+	// Lower than GitHub because single items at lower verification confidence.
+	var specs []dimSpec
+	switch sourceType {
+	case domain.SourceBlog:
+		specs = []dimSpec{
+			{domain.DimThinker, 55, 0.85, "published writing/analysis"},
+			{domain.DimSpecialist, 25, 0.60, "domain knowledge in writing"},
+		}
+	case domain.SourcePortfolio:
+		specs = []dimSpec{
+			{domain.DimBuilder, 45, 0.90, "shipped portfolio project"},
+			{domain.DimSpecialist, 30, 0.75, "demonstrated domain depth"},
+		}
+	case domain.SourceCommunity:
+		specs = []dimSpec{
+			{domain.DimCollaborator, 45, 0.75, "community contribution"},
+			{domain.DimThinker, 20, 0.55, "shared knowledge publicly"},
+		}
+	default: // other, linkedin, manual
+		specs = []dimSpec{
+			{domain.DimBuilder, 20, 0.65, "additional evidence"},
+			{domain.DimThinker, 15, 0.55, "additional evidence"},
+		}
+	}
+
+	events := make([]*domain.SignalEvent, 0, len(specs))
+	for _, spec := range specs {
+		final := clamp(round(float64(spec.basePoints)*spec.weight*confidence), 0, 100)
+		if final == 0 {
+			continue
+		}
+		expl := spec.explanation
+		ev := &domain.SignalEvent{
+			UserID:               userID,
+			EvidenceItemID:       &evidenceID,
+			Dimension:            spec.dimension,
+			BasePoints:           spec.basePoints,
+			WeightMultiplier:     spec.weight,
+			ConfidenceMultiplier: confidence,
+			FinalPoints:          final,
+			Explanation:          &expl,
+		}
+		events = append(events, ev)
+	}
+	return events
+}
+
+// verifyURL does a HEAD request to check whether a URL is reachable.
+func verifyURL(rawURL string) bool {
+	req, err := http.NewRequest(http.MethodHead, rawURL, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("User-Agent", "Signal-Verifier/1.0")
+	resp, err := urlVerifyClient.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode < 400
 }
 
 func clamp(v, lo, hi int) int {

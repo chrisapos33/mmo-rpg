@@ -4,11 +4,13 @@ import { useAuthStore } from '../../store/auth'
 import { Button } from '../../components/ui/Button'
 import { SignalRadar } from '../../components/signal/SignalRadar'
 import { getGitHubAuthorizeUrl, getGitHubStatus, syncGitHub } from '../../api/github'
-import { getSignalScores } from '../../api/signal'
+import { getSignalScores, getSignalEvidence } from '../../api/signal'
 import { getBuild } from '../../api/onboarding'
 import { publishProfile } from '../../api/profile'
+import { submitEvidence, removeEvidence } from '../../api/evidence'
 import { ApiError } from '../../api/client'
-import type { GitHubConnection, UserSignalScore, Profile } from '../../types'
+import { EVIDENCE_SOURCE_LABELS as SOURCE_LABELS } from '../../types'
+import type { GitHubConnection, UserSignalScore, Profile, EvidenceItem, EvidenceSourceType, SubmitEvidenceRequest } from '../../types'
 
 // Static quest board — dimension-linked progression suggestions.
 // These will become dynamic in a later phase.
@@ -24,15 +26,15 @@ const QUESTS = [
     title: 'Add a technical write-up',
     description: 'Publish analysis, a deep dive, or a how-to. Demonstrates your thinking, not just your output.',
     dimensions: ['Thinker'] as const,
-    cta: 'Coming soon',
-    action: null,
+    cta: 'Add evidence →',
+    action: 'evidence',
   },
   {
-    title: 'Contribute to an OSS issue',
-    description: 'A merged PR or meaningful issue response in a public repo adds Builder and Specialist evidence.',
+    title: 'Add a portfolio project',
+    description: 'Link something you shipped. Adds Builder and Specialist signal with URL verification.',
     dimensions: ['Builder', 'Specialist'] as const,
-    cta: 'Coming soon',
-    action: null,
+    cta: 'Add evidence →',
+    action: 'evidence',
   },
   {
     title: 'Get peer feedback',
@@ -73,6 +75,13 @@ export function Hub() {
 
   const [signal, setSignal] = useState<UserSignalScore | null>(null)
   const [build, setBuild] = useState<Profile | null>(null)
+  const [evidence, setEvidence] = useState<EvidenceItem[]>([])
+  const [showEvidenceForm, setShowEvidenceForm] = useState(false)
+  const [evidenceSubmitting, setEvidenceSubmitting] = useState(false)
+  const [evidenceError, setEvidenceError] = useState<string | null>(null)
+  const [evidenceForm, setEvidenceForm] = useState<SubmitEvidenceRequest>({
+    source_type: 'blog', title: '', artifact_url: '', description: '',
+  })
   const [publishing, setPublishing] = useState(false)
   const [publishError, setPublishError] = useState<string | null>(null)
 
@@ -96,6 +105,10 @@ export function Hub() {
 
     getSignalScores()
       .then(setSignal)
+      .catch(() => {})
+
+    getSignalEvidence()
+      .then(items => setEvidence(items.filter(i => i.source_type !== 'github')))
       .catch(() => {})
   }, [])
 
@@ -145,6 +158,34 @@ export function Hub() {
   }
 
   const hasBuild = build !== null
+
+  async function handleSubmitEvidence(e: React.FormEvent) {
+    e.preventDefault()
+    setEvidenceSubmitting(true)
+    setEvidenceError(null)
+    try {
+      const saved = await submitEvidence(evidenceForm)
+      setEvidence(prev => [saved, ...prev])
+      setShowEvidenceForm(false)
+      setEvidenceForm({ source_type: 'blog', title: '', artifact_url: '', description: '' })
+      // Refresh signal after evidence submission
+      getSignalScores().then(setSignal).catch(() => {})
+    } catch (err) {
+      setEvidenceError(err instanceof Error ? err.message : 'Submission failed')
+    } finally {
+      setEvidenceSubmitting(false)
+    }
+  }
+
+  async function handleDeleteEvidence(id: number) {
+    try {
+      await removeEvidence(id)
+      setEvidence(prev => prev.filter(e => e.id !== id))
+      getSignalScores().then(setSignal).catch(() => {})
+    } catch {
+      // non-fatal, leave item in list
+    }
+  }
 
   async function handlePublish() {
     setPublishing(true)
@@ -262,6 +303,100 @@ export function Hub() {
           </div>
         </section>
 
+        {/* Manual evidence */}
+        <section id="evidence-section" className="border border-void-700 bg-void-900">
+          <div className="border-b border-void-700 px-6 py-4 flex items-center justify-between">
+            <span className="text-xs text-gold-400 tracking-[0.25em] uppercase">Evidence</span>
+            <button
+              onClick={() => { setShowEvidenceForm(v => !v); setEvidenceError(null) }}
+              className="text-xs border border-void-600 px-3 py-1.5 text-ink-400 hover:border-gold-400 hover:text-gold-300 transition-colors"
+            >
+              {showEvidenceForm ? 'Cancel' : '+ Add'}
+            </button>
+          </div>
+
+          <div className="p-6 space-y-5">
+            {/* Add form */}
+            {showEvidenceForm && (
+              <form onSubmit={handleSubmitEvidence} className="border border-void-700 p-5 space-y-4">
+                <p className="text-xs text-gold-400 tracking-[0.25em] uppercase mb-1">New evidence item</p>
+
+                {evidenceError && (
+                  <p className="text-red-400 text-xs">{evidenceError}</p>
+                )}
+
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] text-ink-500 uppercase tracking-widest">Type</label>
+                    <select
+                      value={evidenceForm.source_type}
+                      onChange={e => setEvidenceForm(f => ({ ...f, source_type: e.target.value as EvidenceSourceType }))}
+                      className="bg-void-800 border border-void-600 text-ink-200 text-sm px-3 py-2 focus:outline-none focus:border-gold-400"
+                    >
+                      {(Object.keys(SOURCE_LABELS) as EvidenceSourceType[]).map(k => (
+                        <option key={k} value={k}>{SOURCE_LABELS[k]}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] text-ink-500 uppercase tracking-widest">Title</label>
+                    <input
+                      required
+                      value={evidenceForm.title}
+                      onChange={e => setEvidenceForm(f => ({ ...f, title: e.target.value }))}
+                      placeholder="What did you create?"
+                      className="bg-void-800 border border-void-600 text-ink-200 text-sm px-3 py-2 placeholder:text-ink-600 focus:outline-none focus:border-gold-400"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] text-ink-500 uppercase tracking-widest">URL</label>
+                  <input
+                    required
+                    type="url"
+                    value={evidenceForm.artifact_url}
+                    onChange={e => setEvidenceForm(f => ({ ...f, artifact_url: e.target.value }))}
+                    placeholder="https://..."
+                    className="bg-void-800 border border-void-600 text-ink-200 text-sm px-3 py-2 placeholder:text-ink-600 focus:outline-none focus:border-gold-400 font-mono"
+                  />
+                  <p className="text-[10px] text-ink-600">URL will be verified — confidence scales with verification level.</p>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] text-ink-500 uppercase tracking-widest">Description <span className="normal-case text-void-600">(optional)</span></label>
+                  <textarea
+                    rows={2}
+                    value={evidenceForm.description ?? ''}
+                    onChange={e => setEvidenceForm(f => ({ ...f, description: e.target.value || undefined }))}
+                    placeholder="Brief context..."
+                    className="bg-void-800 border border-void-600 text-ink-200 text-sm px-3 py-2 placeholder:text-ink-600 focus:outline-none focus:border-gold-400 resize-none"
+                  />
+                </div>
+
+                <div className="flex justify-end">
+                  <Button type="submit" loading={evidenceSubmitting} className="px-6 py-2 text-xs">
+                    Submit evidence
+                  </Button>
+                </div>
+              </form>
+            )}
+
+            {/* Evidence list */}
+            {evidence.length === 0 && !showEvidenceForm && (
+              <p className="text-sm text-ink-600">
+                No evidence added yet. Blog posts, portfolio projects, and community contributions
+                feed your Thinker, Builder, and Collaborator signal.
+              </p>
+            )}
+
+            {evidence.map(item => (
+              <EvidenceRow key={item.id} item={item} onDelete={() => handleDeleteEvidence(item.id)} />
+            ))}
+          </div>
+        </section>
+
         {/* Quest board */}
         <section>
           <div className="flex items-center justify-between mb-4">
@@ -272,6 +407,7 @@ export function Hub() {
             {QUESTS.map(quest => {
               const githubConnected = !!ghConn
               const isGitHubQuest = quest.action === 'github'
+              const isEvidenceQuest = quest.action === 'evidence'
               const done = isGitHubQuest && githubConnected
               return (
                 <div
@@ -304,6 +440,13 @@ export function Hub() {
                         >
                           {ghConnecting ? 'Redirecting…' : quest.cta}
                         </Button>
+                      ) : isEvidenceQuest ? (
+                        <button
+                          onClick={() => { setShowEvidenceForm(true); document.getElementById('evidence-section')?.scrollIntoView({ behavior: 'smooth' }) }}
+                          className="text-xs border border-void-600 px-4 py-2 text-ink-300 hover:border-gold-400 hover:text-gold-300 transition-colors whitespace-nowrap"
+                        >
+                          {quest.cta}
+                        </button>
                       ) : (
                         <span className="text-xs text-ink-600">{quest.cta}</span>
                       )}
@@ -457,6 +600,61 @@ function BuildPanel({
         </div>
       </div>
     </section>
+  )
+}
+
+const VERIF_LABELS: Record<string, { label: string; color: string }> = {
+  unverified:        { label: 'Unverified',        color: 'text-ink-600 border-ink-700' },
+  url_verified:      { label: 'URL Verified',       color: 'text-signal-400 border-signal-400/30' },
+  platform_verified: { label: 'Platform Verified',  color: 'text-gold-400 border-gold-400/30' },
+  peer_verified:     { label: 'Peer Verified',       color: 'text-emerald-400 border-emerald-400/30' },
+  admin_verified:    { label: 'Admin Verified',      color: 'text-violet-400 border-violet-400/30' },
+}
+
+function EvidenceRow({ item, onDelete }: { item: EvidenceItem; onDelete: () => void }) {
+  const verif = VERIF_LABELS[item.verification_status] ?? VERIF_LABELS.unverified
+  const [confirming, setConfirming] = useState(false)
+
+  return (
+    <div className="flex items-start justify-between gap-4 py-3 border-b border-void-800 last:border-0">
+      <div className="flex-1 min-w-0 space-y-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-ink-600 uppercase tracking-widest">
+            {SOURCE_LABELS[item.source_type] ?? item.source_type}
+          </span>
+          <span className={`text-[10px] px-2 py-0.5 border tracking-widest uppercase ${verif.color}`}>
+            {verif.label}
+          </span>
+        </div>
+        <p className="text-sm text-ink-200 truncate">{item.title}</p>
+        {item.artifact_url && (
+          <a
+            href={item.artifact_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-ink-600 hover:text-ink-400 font-mono truncate block transition-colors"
+          >
+            {item.artifact_url}
+          </a>
+        )}
+      </div>
+      <div className="flex-shrink-0">
+        {confirming ? (
+          <div className="flex items-center gap-2">
+            <button onClick={() => { onDelete(); setConfirming(false) }} className="text-xs text-red-400 hover:text-red-300">
+              Remove
+            </button>
+            <button onClick={() => setConfirming(false)} className="text-xs text-ink-600 hover:text-ink-400">
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => setConfirming(true)} className="text-xs text-ink-700 hover:text-ink-500 transition-colors">
+            ✕
+          </button>
+        )}
+      </div>
+    </div>
   )
 }
 

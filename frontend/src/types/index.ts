@@ -139,17 +139,33 @@ export interface PublicProfileResponse {
   github: GitHubConnection | null
 }
 
+export type EvidenceSourceType = 'blog' | 'portfolio' | 'community' | 'other'
+
+export const EVIDENCE_SOURCE_LABELS: Record<EvidenceSourceType, string> = {
+  blog:      'Blog / Writing',
+  portfolio: 'Portfolio Project',
+  community: 'Community Contribution',
+  other:     'Other',
+}
+
 export interface EvidenceItem {
   id: number
   user_id: number
-  source_type: string
+  source_type: EvidenceSourceType
   source_key: string
   artifact_url: string | null
   title: string
   description: string | null
   metadata: Record<string, unknown> | null
-  verification_status: string
+  verification_status: 'unverified' | 'url_verified' | 'platform_verified' | 'peer_verified' | 'admin_verified'
   verification_confidence: number
   created_at: string
   updated_at: string
+}
+
+export interface SubmitEvidenceRequest {
+  source_type: EvidenceSourceType
+  title: string
+  artifact_url: string
+  description?: string
 }
