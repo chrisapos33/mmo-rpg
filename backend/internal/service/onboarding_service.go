@@ -20,6 +20,7 @@ type OnboardingService struct {
 	profileRepo *repository.ProfileRepo
 	aiClient    *ai.Client
 	uploadDir   string
+	mockAI      bool
 }
 
 func NewOnboardingService(
@@ -27,12 +28,14 @@ func NewOnboardingService(
 	profileRepo *repository.ProfileRepo,
 	aiClient *ai.Client,
 	uploadDir string,
+	mockAI bool,
 ) *OnboardingService {
 	return &OnboardingService{
 		cvRepo:      cvRepo,
 		profileRepo: profileRepo,
 		aiClient:    aiClient,
 		uploadDir:   uploadDir,
+		mockAI:      mockAI,
 	}
 }
 
@@ -88,9 +91,16 @@ func (s *OnboardingService) GenerateBuild(ctx context.Context, userID int64) (*d
 		return nil, fmt.Errorf("reading CV data: %w", err)
 	}
 
-	build, err := ai.GenerateBuild(ctx, s.aiClient, &cvData)
-	if err != nil {
-		return nil, fmt.Errorf("build generation: %w", err)
+	var build *domain.BuildData
+	if s.mockAI {
+		build = mockBuild()
+		log.Printf("build_gen [user:%d]: MOCK MODE — skipping Claude", userID)
+	} else {
+		var err error
+		build, err = ai.GenerateBuild(ctx, s.aiClient, &cvData)
+		if err != nil {
+			return nil, fmt.Errorf("build generation: %w", err)
+		}
 	}
 
 	profile, err := s.profileRepo.UpsertBuild(ctx, userID, build)
@@ -119,6 +129,18 @@ func (s *OnboardingService) GetBuild(ctx context.Context, userID int64) (*domain
 func (s *OnboardingService) processCV(uploadID int64, storagePath string) {
 	ctx := context.Background()
 
+	if s.mockAI {
+		// Simulate processing delay so the frontend polling sees a real transition.
+		time.Sleep(3 * time.Second)
+		data := mockCVData()
+		if err := s.cvRepo.MarkDone(ctx, uploadID, data); err != nil {
+			log.Printf("cv_parse [%d]: marking done failed: %v", uploadID, err)
+		} else {
+			log.Printf("cv_parse [%d]: MOCK MODE — done", uploadID)
+		}
+		return
+	}
+
 	text, err := ai.ExtractTextFromPDF(storagePath)
 	if err != nil {
 		log.Printf("cv_parse [%d]: pdf extraction failed: %v", uploadID, err)
@@ -140,3 +162,60 @@ func (s *OnboardingService) processCV(uploadID int64, storagePath string) {
 
 	log.Printf("cv_parse [%d]: done — %d skills, %d experiences", uploadID, len(data.Skills), len(data.Experiences))
 }
+
+// ─── Mock data ────────────────────────────────────────────────────────────────
+
+func mockCVData() *domain.CVData {
+	desc1 := "Led backend architecture for a real-time data platform handling 15M events/day. Reduced p99 latency by 60% through query optimisation and connection pooling."
+	desc2 := "Built internal developer tooling and REST APIs consumed by 8 product teams. Introduced contract testing, cutting integration regressions by 40%."
+	deg := "BSc"
+	field := "Computer Science"
+	year := "2018"
+	email := "alex@example.com"
+	loc := "Remote"
+	summary := "Full-stack engineer with 6 years building distributed systems and developer tooling. Strong bias toward operational simplicity and high-leverage infrastructure work."
+
+	return &domain.CVData{
+		FullName: "Alex Hunter",
+		Email:    &email,
+		Location: &loc,
+		Summary:  &summary,
+		Experiences: []domain.CVExperience{
+			{
+				Company: "Acme Systems", Title: "Senior Software Engineer",
+				StartDate: "2021-03", IsCurrent: true,
+				Description: &desc1,
+			},
+			{
+				Company: "Startup Labs", Title: "Software Engineer",
+				StartDate: "2019-01", EndDate: strPtr("2021-02"),
+				Description: &desc2,
+			},
+		},
+		Skills:    []string{"Go", "TypeScript", "PostgreSQL", "Redis", "Kubernetes", "gRPC", "React", "Docker"},
+		Education: []domain.CVEducation{{Institution: "State University", Degree: &deg, Field: &field, Year: &year}},
+		Languages: []string{"English"},
+		InferredSpecializations: []string{"backend systems", "distributed architecture", "developer tooling"},
+	}
+}
+
+func mockBuild() *domain.BuildData {
+	return &domain.BuildData{
+		Class:    "The Architect",
+		Subclass: "Systems Design",
+		Headline: "Builds distributed systems that scale under pressure and teams that ship with confidence.",
+		Summary:  "A methodical engineer who operates at the intersection of backend architecture and developer experience. Known for designing systems that are both technically rigorous and operationally sane — the kind of infrastructure work that makes every engineer around them more effective.",
+		Strengths: []string{
+			"Distributed systems design at scale",
+			"Developer tooling and internal platform engineering",
+			"Operational simplicity and performance optimisation",
+		},
+		GrowthPaths: []string{
+			"Staff / Principal engineering track",
+			"Open-source infrastructure project ownership",
+			"Technical writing and architecture documentation",
+		},
+	}
+}
+
+func strPtr(s string) *string { return &s }
