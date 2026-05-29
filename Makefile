@@ -8,9 +8,9 @@ db:
 db-down:
 	docker compose down
 
-# Run backend (requires .env or env vars set)
+# Run backend (loads .env if present)
 backend:
-	@cd backend && source ../.env 2>/dev/null || true; go run ./cmd/api
+	@set -a; [ -f .env ] && . ./.env; set +a; cd backend && go run ./cmd/api
 
 # Run frontend dev server
 frontend:
