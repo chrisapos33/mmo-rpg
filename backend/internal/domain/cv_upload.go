@@ -17,7 +17,7 @@ type CVUpload struct {
 	StoragePath   string          `db:"storage_path"   json:"-"`
 	OriginalName  string          `db:"original_name"  json:"original_name"`
 	Status        string          `db:"status"         json:"status"`
-	ExtractedData json.RawMessage `db:"extracted_data" json:"extracted_data,omitempty"`
+	ExtractedData *json.RawMessage `db:"extracted_data" json:"extracted_data,omitempty"`
 	ErrorMessage  *string         `db:"error_message"  json:"error_message,omitempty"`
 	CreatedAt     time.Time       `db:"created_at"     json:"created_at"`
 	ProcessedAt   *time.Time      `db:"processed_at"   json:"processed_at,omitempty"`

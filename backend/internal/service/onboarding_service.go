@@ -87,7 +87,7 @@ func (s *OnboardingService) GenerateBuild(ctx context.Context, userID int64) (*d
 	}
 
 	var cvData domain.CVData
-	if err := json.Unmarshal(upload.ExtractedData, &cvData); err != nil {
+	if err := json.Unmarshal(*upload.ExtractedData, &cvData); err != nil {
 		return nil, fmt.Errorf("reading CV data: %w", err)
 	}
 
