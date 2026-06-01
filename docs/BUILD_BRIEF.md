@@ -7,6 +7,38 @@
 
 ---
 
+## LOCKED DECISIONS (read first — these override anything below that conflicts)
+
+These were decided after the repo inventory. They take precedence over the existing code
+and the original brief wording.
+
+**Decision 1 — Taxonomy: 5 dimensions + Trust as a META-score.**
+The scoring model is FIVE dimensions: **Output/Cadence, Craft/Quality, Influence/Reach,
+Collaboration, Range**. Trust is NOT a sixth peer dimension — it is a meta-score computed
+from the confidence of the underlying evidence (see §4).
+- The existing DB (`user_signal_scores`) and AI generator use the OLD six:
+  Builder/Thinker/Executor/Collaborator/Specialist/**Trusted**. This is a mismatch to be
+  migrated, NOT a thing to build on.
+- **Drop `trusted` as a peer column** (it becomes the computed meta-score).
+- **Keep the 7 existing classes** (Architect, Artisan, Pathfinder, Sage, Operator,
+  Sentinel, Artificer) as flavor — they are MAPPED FROM the dimensions, not replaced.
+
+**Decision 2 — Scoring model: ledger + decay/caps/normalize.**
+Keep the existing `signal_events` table as the raw weighted-evidence **ledger** (good
+design — `final_points = base × weight × confidence` already encodes quality + trust
+weighting). But the engine, when aggregating, MUST apply **recency decay + per-source
+caps** and **normalize to 0–100** (percentile, with a seeded reference distribution for
+cold-start). **Do NOT expose cumulative raw points as the rank** — raw additive points
+with no decay/cap is the "only-goes-up rewards volume" failure mode we are avoiding.
+
+**Sequencing note:** the scoring engine (step 2) is a PURE module with fixtures and does
+NOT touch the DB — so it is written directly against the new 5+Trust taxonomy now. The
+schema migration (rename/restructure columns, drop `trusted`, update `domain/signal`, the
+dimension mapping in `signal_service`, and the AI prompt) happens as ONE change set in the
+persistence step, because this decision cuts across all of them.
+
+---
+
 ## 0. STEP ZERO — Inventory before you build
 
 Before writing or changing ANY code, scan the existing repo and report back:
@@ -111,6 +143,9 @@ Do not invest in deep CV parsing; invest in GitHub.
 
 ## 4. The 5 dimensions + Trust (scoring engine spec)
 
+> Taxonomy and aggregation model are fixed in **LOCKED DECISIONS** above (5 dimensions +
+> Trust-as-meta; ledger + decay/caps/normalize). This section is the detail.
+
 Build the scoring engine as an **isolated, independently testable module** (pure
 functions: raw ingested data in → scores out, no DB or HTTP coupling). This is the heart
 of the product and the thing future signals plug into without a rewrite.
@@ -154,6 +189,10 @@ class, not "good/bad".
 fraction of its underlying evidence is third-party-attributed vs self-controlled.
 Trust = the weighted share of high-confidence evidence across the whole build. This is
 the thing the user "levels up" by connecting GitHub. Honest, satisfying loop.
+**The data model already supports this:** `evidence_items` carries
+`verification_status` + `verification_confidence` (0–1), and `signal_events` carries a
+`confidence_multiplier`. Confidence is already weighted at the per-evidence level — the
+Trust meta-score aggregates exactly this. Reuse it; do not invent a parallel mechanism.
 
 ### Normalization & cold-start
 Ranking is **percentile within the dev cohort** — but with ~10 users there's no
