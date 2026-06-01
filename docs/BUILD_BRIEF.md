@@ -1,0 +1,243 @@
+# BUILD BRIEF — mmo-rpg (v1 MVP)
+
+> **For: Claude Code (or equivalent coding agent) with direct access to the repo.**
+> This document defines the v1 scope, architecture, aesthetic, and implementation
+> order. Anything not in this file is OUT of v1 — see `VISION.md` for future scope.
+> Do not build VISION items now.
+
+---
+
+## 0. STEP ZERO — Inventory before you build
+
+Before writing or changing ANY code, scan the existing repo and report back:
+
+- The full directory tree of `backend/` and `frontend/`.
+- For the backend: list every file under `internal/` (repository, service, handler,
+  api, ai, config, migrations). Summarize what each service and handler currently does.
+- The existing DB schema: read all migration files and output the current tables,
+  columns, and relationships.
+- The frontend: framework, routing setup, existing pages/components, styling approach
+  (CSS files, any UI library), and how it talks to the backend.
+- `docker-compose.yml`, `Makefile`, `.env.example`: what services, env vars, and
+  commands already exist.
+
+**Output a short written inventory, then STOP and wait for confirmation before
+implementing.** The point is to build ON TOP of what exists, not regenerate it.
+
+Known facts already established (verify against reality):
+- Backend: Go + `sqlx` + Postgres (`lib/pq`), migrations via `goose` (embedded FS,
+  run on boot), JWT auth, Anthropic AI client gated behind a `MockAI` config flag.
+- Layering: `repository → service → handler → router` (clean, keep it).
+- Repos: User, CV, Profile, GitHub, Signal.
+- Services: Auth (JWT), Onboarding (CV upload + AI profile), Signal, GitHub (OAuth).
+- Handlers: Profile, Explore, Evidence.
+- Frontend: TypeScript / React.
+
+**Minor cleanup to flag (do not auto-fix without asking):** the Go module path is
+`github.com/chrisapos3/mmo-rpg` but the repo is `chrisapos33/mmo-rpg` (double 3).
+Harmless locally; matters only if the module ever needs to be `go get`-able.
+
+---
+
+## 1. What this product IS (v1)
+
+A professional-identity tool for **developers only** (v1 is dev-only — this is a
+deliberate constraint, not a limitation). A developer connects their GitHub account;
+a scoring engine derives a multi-dimensional, **verification-aware** score from real
+GitHub activity; an AI layer translates those scores into an MMORPG-style character
+build (class, subclass, headline, flavor text); the result is shown as a high-fantasy
+character profile with a procedurally generated emblem; and an Explore page lets users
+discover other "hunters" filtered by class.
+
+That is the entire v1. Four pages, one scoring engine, one AI layer, one emblem
+generator.
+
+### The core principle that governs the whole scoring engine
+
+> **Rank by what OTHER people did in relation to your work. Anything you did alone in
+> your own repos is liveness/context with a capped weight — never a ranker.**
+
+Anything fully under the user's control (commit count, number of repos, lines of code,
+"I know 12 languages") is trivially gameable. Anything that required a *third party* to
+act on the user's work (a maintainer merged their PR, someone depends on their package,
+someone reviewed their code) is expensive to fake. Verification IS third-party
+attribution. This single principle drives both the scoring and the anti-gaming design.
+
+---
+
+## 2. Scope — IN vs OUT
+
+### IN (build these)
+- GitHub OAuth (log in **as the user**, use the user's token / rate limit).
+- GitHub ingestion layer (REST + GraphQL v4 `contributionsCollection`).
+- Scoring engine producing 5 dimensions + a Trust meta-score (isolated, testable module).
+- AI generation layer: scores → class / subclass / headline / flavor text
+  (single structured LLM call; respect the existing `MockAI` flag).
+- Deterministic emblem generator (same build → same emblem).
+- Persistence: users, builds, cached scores/signals, evidence.
+- Four frontend pages: Landing, Auth/OAuth callback, Character/Profile, Explore.
+- High-fantasy MMORPG aesthetic (see §5).
+
+### OUT (do NOT build — these live in `VISION.md`)
+- Anything company/recruiter-facing (the two-sided marketplace).
+- Social feed, posts, activity stream, points-for-engagement.
+- Open-source collaboration hub ("seeking contributors" posts).
+- Support for non-developer professions (designers, marketers, PMs).
+- Figurative AI-generated character art (Midjourney / DALL·E / Stable Diffusion).
+- Public shareable profile URLs (nice, easy later — but not v1).
+
+---
+
+## 3. The CV vs GitHub relationship (important — resolves the two onboarding paths)
+
+The existing code has **two** onboarding paths: `OnboardingService` (CV upload → AI
+profile) and `GitHubService` (OAuth → signals). These are NOT redundant. They are the
+two ends of the **trust spectrum**, and together they form the core gameplay loop:
+
+- **CV = self-reported → a temporary, LOW-confidence build.** A first guess at
+  class/dimensions. Gets the user a character immediately, before connecting anything.
+- **GitHub connect = verified → RAISES confidence.** Validates and/or corrects the
+  build using inspectable, attributable evidence.
+
+The **Trust meta-score** is literally: *what fraction of the build rests on verifiable
+(GitHub) evidence vs self-reported (CV) claims.* "Connect GitHub to make your character
+real" is the loop.
+
+**Decision for v1:** keep both paths, but the scoring engine and the demo are
+**GitHub-centric**. CV is a low-confidence starting point, NOT an equal scoring source.
+Do not invest in deep CV parsing; invest in GitHub.
+
+---
+
+## 4. The 5 dimensions + Trust (scoring engine spec)
+
+Build the scoring engine as an **isolated, independently testable module** (pure
+functions: raw ingested data in → scores out, no DB or HTTP coupling). This is the heart
+of the product and the thing future signals plug into without a rewrite.
+
+Each dimension outputs 0–100. Apply the §1 principle throughout.
+
+**Output / Cadence** — Distinct active days over a rolling window (~12–18 months) with
+recency decay. NOT raw commit count. Active days count *only while the touched repos
+carry external validation* (stars / external contributors / dependents); commits to a
+solo, zero-signal repo ≈ 0. This is **table stakes, not a ranker** — answers "are they
+alive?", not "are they good?". Cap it.
+
+**Craft / Quality** — Proxies only, and be honest they're proxies: presence/ratio of
+tests, CI config (Actions workflows), **depth of review the user's PRs receive before
+merge** (GraphQL review threads — hard to fake, involves others), and **longevity**
+(repos maintained over years, commits answering issues — time is expensive to forge).
+README/docs = weak signal, low weight.
+
+**Influence / Reach** — Gold signal is **dependents** (others literally import the
+code). **Implementation note:** the dependents graph ("Used by") is NOT in the official
+API — either scrape it or, better, pull download stats from package registries (npm
+registry API, pypistats, crates.io). Keep stars but quality-check them: stars *with*
+forks + external contributors + issues from strangers = real; a spike of 5k stars with
+0 forks / 0 issues over 2 days = star-buying (fetch stargazer timestamps via the
+`Accept: application/vnd.github.star+json` header to inspect the curve shape).
+Followers = low weight.
+
+**Collaboration** — Where attribution shines: **merged PRs to repos the user does NOT
+own**, especially popular ones (you can't unilaterally merge into someone else's repo →
+a maintainer approved the work → high confidence). Plus reviews the user *gave* on
+others' PRs, and cross-org breadth. Gaming guard: weight by *merged + substance +
+reputation of the target repo* to defeat typo-PR / Hacktoberfest spam. One substantive
+merged PR to a known repo >> 50 typo PRs.
+
+**Range** — NOT a count of languages, but **depth per language** (how much
+externally-validated work exists in each). Render Specialist↔Generalist as a
+*distribution shape* (concentration of validated work) — descriptive flavor for the
+class, not "good/bad".
+
+**Trust (meta-score, not a dimension)** — For each dimension, compute in parallel what
+fraction of its underlying evidence is third-party-attributed vs self-controlled.
+Trust = the weighted share of high-confidence evidence across the whole build. This is
+the thing the user "levels up" by connecting GitHub. Honest, satisfying loop.
+
+### Normalization & cold-start
+Ranking is **percentile within the dev cohort** — but with ~10 users there's no
+distribution. Pragmatic fix: seed a precomputed reference distribution from a sample of
+public GitHub profiles, start with absolute thresholds, and migrate to true percentile
+as the cohort grows. Make the normalization swappable behind an interface.
+
+### GitHub API realities (save yourself pain)
+- GraphQL v4 `contributionsCollection` gives commits/PRs/reviews/issues with
+  **per-repository breakdown + the repository object**, so you can check each repo's
+  owner & stars and do the "my repo vs someone else's repo" split the whole system
+  depends on.
+- OAuth **as the user** → use their token (their 5000/hr limit) and you can read private
+  contribution counts if they grant it.
+- Compute scores in a **batch/cron job and cache**; periodic recompute implements
+  recency decay. Don't score synchronously on page load.
+- (APIs drift — verify current rate limits / endpoint specs at implementation time.)
+
+---
+
+## 5. Aesthetic — high-fantasy MMORPG (WoW / GW2 / Lineage 2)
+
+**Anchors:** World of Warcraft, Guild Wars 2, Lineage 2. NOT Diablo, NOT Destiny, NOT
+DOTA — those skew dark/sci-fi/painterly and will pull the design the wrong way.
+
+This is *ornate high fantasy*, a different design language from minimal dark themes:
+- **Palette:** warm metallics (gold, bronze), parchment, deep blues / burgundy / forest
+  green. Rich, not flat-black.
+- **Panels:** ornate borders, decorative corner-pieces, framed stat panels (think the
+  WoW character sheet's gilded frames; GW2's elegant art-nouveau edges).
+- **Typography:** fantasy serif for headings/titles (NOT sci-fi mono). Readable body.
+- **Stat bars:** "engraved" / inset feel, not flat progress bars.
+
+**Icons:** use **game-icons.net** (https://game-icons.net) — thousands of CC-licensed
+fantasy SVG icons (swords, shields, runes, classes, magic). SVG, so they compose
+cleanly with the emblem generator. Give each class / dimension / stat its own icon.
+
+**⚠️ Restraint warning:** ornate high-fantasy is *easier to make look cheap* than
+minimal dark, if rushed — it degrades into "medieval clipart". Keep textures restrained
+and the palette consistent. Quality over quantity of ornamentation. Read the repo's
+`frontend-design` conventions if present.
+
+---
+
+## 6. Emblem generator
+
+Deterministic, code-only (SVG), NO image API. Same build → same emblem (use a hash of
+the build/scores as seed). The emblem is a procedurally-composed crest/sigil whose
+shapes, colors, and motifs are functions of the 5 dimensions (e.g. a Collaboration-heavy
+build reads visibly different from an Output-heavy one). This is more impressive to an
+interviewer than calling an image API, scales to infinite users at zero cost, and needs
+zero external assets beyond game-icons SVGs.
+
+---
+
+## 7. Pages (frontend)
+
+1. **Landing** — what it is + a single "Connect GitHub" CTA. Where the aesthetic lives.
+2. **Auth / OAuth callback** — GitHub login, fetch, a "forging your character…" loading
+   state (good moment for the vibe).
+3. **Character / Profile** — the flagship. Emblem, class/subclass/headline, the 5
+   dimensions as framed stat bars, the Trust score, and the underlying
+   artifacts/evidence. ~70% of design effort goes here.
+4. **Explore** — grid of hunters, filter by class, sort. The "I'm not alone" moment.
+
+---
+
+## 8. Suggested implementation order
+
+1. **Inventory** (§0) — report, then confirm.
+2. **Scoring engine** with mock/fixture data — pure module, unit-tested, no external
+   calls. Get the 5 dimensions + Trust producing sane numbers from hand-made fixtures
+   first.
+3. **GitHub OAuth + ingestion** — feed real data into the scoring engine.
+4. **AI generation layer** — scores → class/flavor (respect `MockAI`).
+5. **Frontend** — the four pages, wired to the backend, with the §5 aesthetic.
+6. **Emblem generator** — last; it's polish on top of working scores.
+
+Rationale: the scoring engine is the risky, valuable core — prove it in isolation before
+coupling it to OAuth, AI, or UI.
+
+---
+
+## 9. The one rule to stay on scope
+
+For every feature you're tempted to add, ask: **"Is this needed for GitHub → character →
+Explore?"** If no, it goes in `VISION.md`, not the code.
