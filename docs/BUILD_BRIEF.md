@@ -37,6 +37,24 @@ schema migration (rename/restructure columns, drop `trusted`, update `domain/sig
 dimension mapping in `signal_service`, and the AI prompt) happens as ONE change set in the
 persistence step, because this decision cuts across all of them.
 
+**Decision 3 — Decay is PER-DIMENSION, not global.**
+A single global half-life is wrong. Decay must vary by what the dimension measures:
+- **Output/Cadence** — fast decay (it measures liveness; old activity should fade).
+- **Influence/Reach** — minimal or NO decay. Dependents/reach are a *present-tense
+  snapshot*, not a timestamped event. A library written 2 years ago that 5k repos import
+  *today* has not lost value because the commit is old. Heavy decay here wrongly punishes
+  durable work.
+- **Craft/Quality (longevity)** — slow decay.
+Do not apply one half-life across all dimensions.
+
+**Decision 4 — Trust must NOT be dilutable.**
+A plain weighted-average confidence is wrong: adding weak (e.g. stars-only, ~0.58)
+signals can *lower* Trust even when the developer did MORE verified work. That breaks the
+core "connect GitHub → raise Trust" loop and produces the bad UX "I did more and my trust
+dropped." Trust must be **monotonic in the amount/strength of verified evidence** — i.e.
+adding genuine verified evidence can never decrease it. Model as strength/share of
+high-confidence evidence (with a floor), not a dilutable mean.
+
 ---
 
 ## 0. STEP ZERO — Inventory before you build
@@ -210,6 +228,14 @@ as the cohort grows. Make the normalization swappable behind an interface.
 - Compute scores in a **batch/cron job and cache**; periodic recompute implements
   recency decay. Don't score synchronously on page load.
 - (APIs drift — verify current rate limits / endpoint specs at implementation time.)
+
+### Tuning backlog (revisit with real data — NOT decisions, not blockers)
+- **Cap `repoWeight` in Collaboration.** Current `(log10(stars+1) − 0.95) / 1.5` has no
+  ceiling; a PR to a mega-repo scales unboundedly. Consider `min(weight, ~2.0)` so one
+  Linux-kernel PR doesn't swamp everything. Log already compresses it, so low priority.
+- **Check Craft reference breakpoints.** Two different profiles (top OSS contributor and
+  crafted solo dev) both saturate at p99 — the high end of the curve is flat and stops
+  discriminating. Verify the upper breakpoints actually separate strong-from-stronger.
 
 ---
 
