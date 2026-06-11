@@ -13,3 +13,14 @@ export async function getGitHubStatus(): Promise<GitHubStatusResponse> {
 export async function syncGitHub(): Promise<GitHubConnection> {
   return api.post<GitHubConnection>('/github/sync', {})
 }
+
+export interface ScoringStatus {
+  status: 'idle' | 'running' | 'done' | 'failed'
+  started_at?: string | null
+  done_at?: string | null
+  error?: string | null
+}
+
+export async function getScoringStatus(): Promise<ScoringStatus> {
+  return api.get<ScoringStatus>('/github/scoring/status')
+}

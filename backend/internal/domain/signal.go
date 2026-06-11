@@ -25,20 +25,15 @@ const (
 	VerifAdminVerified    = "admin_verified"
 )
 
-// Signal dimensions.
+// Signal dimensions used in signal_events.dimension (evidence panel taxonomy).
+// These are NOT the scoring engine dimensions — they power the evidence audit trail.
 const (
 	DimBuilder      = "builder"
 	DimThinker      = "thinker"
 	DimExecutor     = "executor"
 	DimCollaborator = "collaborator"
 	DimSpecialist   = "specialist"
-	DimTrusted      = "trusted"
 )
-
-// AllDimensions in the canonical display order.
-var AllDimensions = []string{
-	DimBuilder, DimExecutor, DimSpecialist, DimTrusted, DimCollaborator, DimThinker,
-}
 
 // EvidenceItem represents a verifiable artifact from an external source.
 type EvidenceItem struct {
@@ -70,34 +65,37 @@ type SignalEvent struct {
 	CreatedAt            time.Time `db:"created_at"            json:"created_at"`
 }
 
-// UserSignalScore is the aggregated multi-dimensional signal for a user.
+// UserSignalScore is the scoring-engine output persisted per user.
+// All score columns are written by the background scoring job via scoring.Compute.
+// The ScoringStatus* columns track the job lifecycle so the frontend can poll,
+// mirroring the cv_uploads.status pattern.
 type UserSignalScore struct {
-	UserID            int64     `db:"user_id"            json:"user_id"`
-	BuilderScore      int       `db:"builder_score"      json:"builder_score"`
-	ThinkerScore      int       `db:"thinker_score"      json:"thinker_score"`
-	ExecutorScore     int       `db:"executor_score"     json:"executor_score"`
-	CollaboratorScore int       `db:"collaborator_score" json:"collaborator_score"`
-	SpecialistScore   int       `db:"specialist_score"   json:"specialist_score"`
-	TrustedScore      int       `db:"trusted_score"      json:"trusted_score"`
-	TotalSignal       int       `db:"total_signal"       json:"total_signal"`
-	UpdatedAt         time.Time `db:"updated_at"         json:"updated_at"`
-}
+	UserID int64 `db:"user_id" json:"user_id"`
 
-// DimScore returns the score for a given dimension string.
-func (s *UserSignalScore) DimScore(dim string) int {
-	switch dim {
-	case DimBuilder:
-		return s.BuilderScore
-	case DimThinker:
-		return s.ThinkerScore
-	case DimExecutor:
-		return s.ExecutorScore
-	case DimCollaborator:
-		return s.CollaboratorScore
-	case DimSpecialist:
-		return s.SpecialistScore
-	case DimTrusted:
-		return s.TrustedScore
-	}
-	return 0
+	// Five scoring-engine dimensions: raw pre-normalization value + 0–100 percentile rank.
+	OutputRaw               float64 `db:"output_raw"               json:"output_raw"`
+	OutputPercentile        float64 `db:"output_percentile"        json:"output_percentile"`
+	CraftRaw                float64 `db:"craft_raw"                json:"craft_raw"`
+	CraftPercentile         float64 `db:"craft_percentile"         json:"craft_percentile"`
+	InfluenceRaw            float64 `db:"influence_raw"            json:"influence_raw"`
+	InfluencePercentile     float64 `db:"influence_percentile"     json:"influence_percentile"`
+	CollaborationRaw        float64 `db:"collaboration_raw"        json:"collaboration_raw"`
+	CollaborationPercentile float64 `db:"collaboration_percentile" json:"collaboration_percentile"`
+	RangeRaw                float64 `db:"range_raw"                json:"range_raw"`
+	RangePercentile         float64 `db:"range_percentile"         json:"range_percentile"`
+
+	// Trust is the 0–1 meta-score (never ranked; increases with verified evidence).
+	Trust float64 `db:"trust" json:"trust"`
+
+	// Set when scores were last computed.
+	GitHubUsername *string    `db:"github_username" json:"github_username,omitempty"`
+	ComputedAt     *time.Time `db:"computed_at"     json:"computed_at,omitempty"`
+
+	// Scoring job lifecycle.
+	ScoringStatus    *string    `db:"scoring_status"     json:"scoring_status,omitempty"`
+	ScoringStartedAt *time.Time `db:"scoring_started_at" json:"scoring_started_at,omitempty"`
+	ScoringDoneAt    *time.Time `db:"scoring_done_at"    json:"scoring_done_at,omitempty"`
+	ScoringError     *string    `db:"scoring_error"      json:"scoring_error,omitempty"`
+
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 }

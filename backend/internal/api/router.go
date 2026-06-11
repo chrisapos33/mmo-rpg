@@ -77,6 +77,7 @@ func NewRouter(authSvc *service.AuthService, onboardingSvc *service.OnboardingSe
 				r.Get("/authorize", github.Authorize)
 				r.Get("/status", github.Status)
 				r.Post("/sync", github.Sync)
+				r.Get("/scoring/status", github.ScoringStatus)
 			})
 		})
 	})

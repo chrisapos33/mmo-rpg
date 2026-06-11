@@ -1,4 +1,4 @@
-.PHONY: dev db db-down backend frontend test
+.PHONY: dev db db-down backend frontend test harness
 
 # Start only postgres (preferred for local dev)
 db:
@@ -27,6 +27,12 @@ build-backend:
 # Run backend tests
 test:
 	cd backend && go test ./...
+
+# Dev harness: run scoring/build pipeline against real DB without HTTP or OAuth.
+# Usage: make harness               — all users, reads MOCK_AI from .env
+#        make harness ARGS="-users 1,2 -mock-ai=false"
+harness:
+	@set -a; [ -f .env ] && . ./.env; set +a; cd backend && go run ./cmd/harness $(ARGS)
 
 # Copy env example if .env missing
 .env:

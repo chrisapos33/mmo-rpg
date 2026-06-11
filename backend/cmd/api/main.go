@@ -58,9 +58,9 @@ func main() {
 	aiClient := ai.NewClient(cfg.AnthropicKey)
 
 	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
-	onboardingSvc := service.NewOnboardingService(cvRepo, profileRepo, aiClient, cfg.UploadDir, cfg.MockAI)
 	signalSvc := service.NewSignalService(signalRepo)
-	githubSvc := service.NewGitHubService(ghRepo, signalSvc, cfg.GitHubClientID, cfg.GitHubClientSecret, cfg.GitHubRedirectURL, cfg.FrontendURL)
+	onboardingSvc := service.NewOnboardingService(cvRepo, profileRepo, signalSvc, aiClient, cfg.UploadDir, cfg.MockAI)
+	githubSvc := service.NewGitHubService(ghRepo, signalSvc, cfg.GitHubClientID, cfg.GitHubClientSecret, cfg.GitHubRedirectURL, cfg.FrontendURL, cfg.MockGitHub)
 
 	profileH  := handler.NewProfileHandler(profileRepo, signalRepo, ghRepo)
 	exploreH  := handler.NewExploreHandler(profileRepo)

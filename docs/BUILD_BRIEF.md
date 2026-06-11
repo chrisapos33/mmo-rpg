@@ -47,13 +47,21 @@ A single global half-life is wrong. Decay must vary by what the dimension measur
 - **Craft/Quality (longevity)** — slow decay.
 Do not apply one half-life across all dimensions.
 
-**Decision 4 — Trust must NOT be dilutable.**
-A plain weighted-average confidence is wrong: adding weak (e.g. stars-only, ~0.58)
-signals can *lower* Trust even when the developer did MORE verified work. That breaks the
-core "connect GitHub → raise Trust" loop and produces the bad UX "I did more and my trust
-dropped." Trust must be **monotonic in the amount/strength of verified evidence** — i.e.
-adding genuine verified evidence can never decrease it. Model as strength/share of
-high-confidence evidence (with a floor), not a dilutable mean.
+**Decision 4 — Trust must NOT be dilutable. [Resolved & validated — accumulation model]**
+A plain weighted-average confidence is wrong: adding weak signals (or even counted
+signals weaker than the current mean, e.g. reviews-given at 0.72 added to a 0.92 build)
+can *lower* Trust even when the developer did MORE verified work. That breaks the core
+"connect GitHub → raise Trust" loop.
+**Implemented model (locked):** keep a `minConfidence = 0.70` floor (signals below it
+contribute to percentile dimension scores but are invisible to Trust), then
+`Trust = strength / (strength + 70)` where `strength = Σ(points × confidence)` over
+signals with confidence ≥ 0.70. This is **monotonic by construction**
+(`dTrust/dstrength = 70/(strength+70)² > 0`): adding any verified signal can only raise
+Trust, never lower it. Do not revert to a mean.
+- *Known property, deferred tuning:* Trust can saturate from a single dominant source
+  (e.g. one library with 8k verified stars → Trust ~0.99, above a broadly-active OSS
+  contributor at ~0.93). Acceptable if Trust = "volume of verified evidence"; revisit
+  only if Trust should instead reward *breadth* of sources.
 
 ---
 
@@ -181,6 +189,14 @@ tests, CI config (Actions workflows), **depth of review the user's PRs receive b
 merge** (GraphQL review threads — hard to fake, involves others), and **longevity**
 (repos maintained over years, commits answering issues — time is expensive to forge).
 README/docs = weak signal, low weight.
+**LOCKED — validation gate (resolved):** tests/CI/longevity are *self-controlled* signals
+(you can add a CI file and a tests/ folder to a solo repo with zero third-party
+involvement). They must carry low, capped weight that is **gated/multiplied by
+third-party engagement on that same repo** (stars/forks/external contributors), exactly
+like Cadence only counts active days on validated repos. A solo unvalidated repo's craft
+signals stay ≈0; the same signals on a validated repo unlock full weight. (Verified:
+a 1-repo/0-PR account dropped from Craft p58 → p24; a 480★ repo with deep review stayed
+high.) This is the same principle as §1 — self-controlled signals don't rank you.
 
 **Influence / Reach** — Gold signal is **dependents** (others literally import the
 code). **Implementation note:** the dependents graph ("Used by") is NOT in the official
@@ -197,6 +213,13 @@ a maintainer approved the work → high confidence). Plus reviews the user *gave
 others' PRs, and cross-org breadth. Gaming guard: weight by *merged + substance +
 reputation of the target repo* to defeat typo-PR / Hacktoberfest spam. One substantive
 merged PR to a known repo >> 50 typo PRs.
+> **KNOWN GAP (step 3, must close before going live — not a blocker now):** the
+> external-PR filter compares `repository.owner` to the user's *personal* login. A user
+> who owns/admins an **org** can self-merge a PR into that org's repo: `RepoOwner` is the
+> org (≠ username), so it passes both filter layers and wrongly counts as Collaboration —
+> exactly the non-attributable self-merge the system should exclude. Fix: also check the
+> user's admin/ownership role on the target org/repo, or treat orgs the user controls as
+> "own". Current tests cover the personal case only.
 
 **Range** — NOT a count of languages, but **depth per language** (how much
 externally-validated work exists in each). Render Specialist↔Generalist as a
@@ -217,6 +240,18 @@ Ranking is **percentile within the dev cohort** — but with ~10 users there's n
 distribution. Pragmatic fix: seed a precomputed reference distribution from a sample of
 public GitHub profiles, start with absolute thresholds, and migrate to true percentile
 as the cohort grows. Make the normalization swappable behind an interface.
+
+**LOCKED — reference population:** percentiles are measured against **active developers /
+the target users who can demonstrate their level**, NOT all GitHub accounts. The median
+*active* dev should land ~p50; the median GitHub account (mostly inactive, 1–2 repos, no
+OSS) is NOT the baseline. Rationale: if the baseline is all of GitHub, every real user
+clusters at p95+ and the score stops discriminating between the actual users — defeating
+Explore and ranking. This decision drives all breakpoint calibration. (`reference.go`
+should carry a comment stating this for whoever calibrates later.)
+
+**Do NOT hand-tune breakpoints on 1–2 data points** — that's just a different guess and
+over-fits noise. The seeded curve is a placeholder; real calibration happens when there's
+enough cohort data to swap in the `CohortNormalizer`. Resist tuning the curve before then.
 
 ### GitHub API realities (save yourself pain)
 - GraphQL v4 `contributionsCollection` gives commits/PRs/reviews/issues with
@@ -288,13 +323,42 @@ zero external assets beyond game-icons SVGs.
 
 ## 8. Suggested implementation order
 
-1. **Inventory** (§0) — report, then confirm.
+1. **Inventory** (§0) — report, then confirm. ✅ DONE.
 2. **Scoring engine** with mock/fixture data — pure module, unit-tested, no external
    calls. Get the 5 dimensions + Trust producing sane numbers from hand-made fixtures
-   first.
-3. **GitHub OAuth + ingestion** — feed real data into the scoring engine.
-4. **AI generation layer** — scores → class/flavor (respect `MockAI`).
-5. **Frontend** — the four pages, wired to the backend, with the §5 aesthetic.
+   first. ✅ DONE & VALIDATED — `backend/internal/scoring/` (pure, no DB/HTTP). Gaming
+   guard, per-dimension decay (Decision 3), and non-dilutable Trust (Decision 4) all
+   confirmed via sanity profiles incl. the durable-builder case (Output p10 / Influence
+   p99 — decay is correctly per-dimension).
+3. **GitHub OAuth + ingestion** — feed real data into the scoring engine. ✅ DONE.
+   Engine kept pure (`Ingest` is the sole bridge to `GitHubInput`); `MockGitHubSource`
+   via `MOCK_GITHUB`; GraphQL `contributionsCollection` (two dedup'd 365-day windows for
+   the 548-day span), external-PR classification, reviews, star timestamps, CI/test
+   detection, registry dependents. Scores computed but only logged (schema untouched).
+   Scoring runs via a guarded, panic-recovering job with pollable status.
+   *Carry-forward follow-ups (not blockers): (a) org self-merge gap in Collaboration —
+   see §4; (b) scoring job status is in-memory, move to DB in step 4, and ensure the
+   concurrency guard has a TTL so an orphaned "running" can't lock a user out.*
+4. **AI generation layer** — scores → class/flavor (respect `MockAI`). Note: the schema
+   migration to the new 5+Trust taxonomy (drop `trusted` column, rename dimensions,
+   update `domain/signal` + `signal_service` mapping + AI prompt) lands as ONE change set
+   around steps 3–4 per the Sequencing note in LOCKED DECISIONS.
+   - **4a — schema migration + persistence:** ✅ DONE. New columns (raw + percentile per
+     dimension, `trust`), old columns dropped, scores written by the scoring job (now
+     DB-backed). Real-account checkpoint run: surfaced + fixed the Craft self-controlled
+     gaming hole (validation gate, see §4); reference-population decision locked (see
+     Normalization). Breakpoints intentionally NOT tuned (insufficient data).
+   - **4b — AI rewiring:** ✅ DONE & VALIDATED. build_generator takes the 5+Trust
+     percentiles (NOT raw) as primary input; CV is low-confidence fallback. Prompt uses
+     an explicit p0–29/30–69/70–89/90–100 tier scale benchmarked against active devs, and
+     an "all dimensions Low" rule forcing humble/emerging voice. Real-AI run confirmed
+     discrimination: opposite shapes got different classes AND different voice
+     (near-empty account → Pathfinder, "still taking shape", explicit Trust caveat;
+     elite fixture → Architect, authoritative, no hedge). growth_paths reference real
+     dimensions, confirming the model reads the shape. Permanent harness: `make harness`.
+     Minor open item: confirm the AI model name is config-driven, not hardcoded.
+5. **Frontend** — the four pages, wired to the backend, with the §5 aesthetic. Includes
+   the full retheme from the current dark sci-fi palette to warm high-fantasy.
 6. **Emblem generator** — last; it's polish on top of working scores.
 
 Rationale: the scoring engine is the risky, valuable core — prove it in isolation before

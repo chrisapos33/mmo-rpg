@@ -12,6 +12,7 @@ type Config struct {
 	AnthropicKey       string
 	UploadDir          string
 	MockAI             bool
+	MockGitHub         bool
 	GitHubClientID     string
 	GitHubClientSecret string
 	GitHubRedirectURL  string
@@ -23,9 +24,10 @@ func Load() (*Config, error) {
 		DatabaseURL:        os.Getenv("DATABASE_URL"),
 		JWTSecret:          os.Getenv("JWT_SECRET"),
 		Port:               os.Getenv("PORT"),
-		AnthropicKey:       os.Getenv("ANTHROPIC_API_KEY"),
+		AnthropicKey:       os.Getenv("AI_API_KEY"),
 		UploadDir:          os.Getenv("UPLOAD_DIR"),
 		MockAI:             os.Getenv("MOCK_AI") == "true",
+		MockGitHub:         os.Getenv("MOCK_GITHUB") == "true",
 		GitHubClientID:     os.Getenv("GITHUB_CLIENT_ID"),
 		GitHubClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),
 		GitHubRedirectURL:  os.Getenv("GITHUB_REDIRECT_URL"),

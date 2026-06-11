@@ -71,7 +71,6 @@ export function Hub() {
   const [ghConnecting, setGhConnecting] = useState(false)
   const [ghSyncing, setGhSyncing] = useState(false)
   const [ghError, setGhError] = useState<string | null>(null)
-  const [ghJustConnected, setGhJustConnected] = useState(false)
 
   const [signal, setSignal] = useState<UserSignalScore | null>(null)
   const [build, setBuild] = useState<Profile | null>(null)
@@ -108,7 +107,7 @@ export function Hub() {
       .catch(() => {})
 
     getSignalEvidence()
-      .then(items => setEvidence(items.filter(i => i.source_type !== 'github')))
+      .then(setEvidence)
       .catch(() => {})
   }, [])
 
@@ -119,13 +118,8 @@ export function Hub() {
     setSearchParams({}, { replace: true })
 
     if (status === 'connected') {
-      setGhJustConnected(true)
-      Promise.all([getGitHubStatus(), getSignalScores()])
-        .then(([gh, sig]) => {
-          setGhConn(gh.connection)
-          setSignal(sig)
-        })
-        .catch(() => {})
+      // Redirect to the forging screen which polls real scoring status
+      navigate('/forging', { replace: true })
     } else if (status === 'error') {
       setGhError('GitHub connection failed. Please try again.')
     }
@@ -204,9 +198,13 @@ export function Hub() {
 
   const zeroSignal: UserSignalScore = {
     user_id: user?.id ?? 0,
-    builder_score: 0, thinker_score: 0, executor_score: 0,
-    collaborator_score: 0, specialist_score: 0, trusted_score: 0,
-    total_signal: 0, updated_at: '',
+    output_percentile: 0,
+    craft_percentile: 0,
+    influence_percentile: 0,
+    collaboration_percentile: 0,
+    range_percentile: 0,
+    trust: 0,
+    updated_at: '',
   }
 
   return (
@@ -289,10 +287,6 @@ export function Hub() {
 
           <div className="p-6">
             {ghError && <p className="text-red-400 text-xs mb-4">{ghError}</p>}
-            {ghJustConnected && !ghError && (
-              <p className="text-signal-400 text-xs mb-4 tracking-wide">◈ GitHub connected — signal updated</p>
-            )}
-
             {ghLoading ? (
               <p className="text-ink-600 text-sm">Loading…</p>
             ) : ghConn ? (

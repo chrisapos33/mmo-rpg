@@ -8,6 +8,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/chrisapos3/mmo-rpg/internal/domain"
+	"github.com/chrisapos3/mmo-rpg/internal/scoring"
 )
 
 type SignalRepo struct {
@@ -73,49 +74,22 @@ func (r *SignalRepo) ReplaceSignalEvents(ctx context.Context, evidenceItemID int
 	return tx.Commit()
 }
 
-// RecomputeScores aggregates all signal_events for a user and upserts user_signal_scores.
-func (r *SignalRepo) RecomputeScores(ctx context.Context, userID int64) (*domain.UserSignalScore, error) {
-	var score domain.UserSignalScore
-	err := r.db.QueryRowxContext(ctx, `
-		INSERT INTO user_signal_scores
-		  (user_id, builder_score, thinker_score, executor_score,
-		   collaborator_score, specialist_score, trusted_score, total_signal, updated_at)
-		SELECT
-		  $1,
-		  COALESCE(SUM(final_points) FILTER (WHERE dimension = 'builder'),      0),
-		  COALESCE(SUM(final_points) FILTER (WHERE dimension = 'thinker'),      0),
-		  COALESCE(SUM(final_points) FILTER (WHERE dimension = 'executor'),     0),
-		  COALESCE(SUM(final_points) FILTER (WHERE dimension = 'collaborator'), 0),
-		  COALESCE(SUM(final_points) FILTER (WHERE dimension = 'specialist'),   0),
-		  COALESCE(SUM(final_points) FILTER (WHERE dimension = 'trusted'),      0),
-		  COALESCE(SUM(final_points), 0),
-		  NOW()
-		FROM signal_events
-		WHERE user_id = $1
-		ON CONFLICT (user_id) DO UPDATE SET
-		  builder_score      = EXCLUDED.builder_score,
-		  thinker_score      = EXCLUDED.thinker_score,
-		  executor_score     = EXCLUDED.executor_score,
-		  collaborator_score = EXCLUDED.collaborator_score,
-		  specialist_score   = EXCLUDED.specialist_score,
-		  trusted_score      = EXCLUDED.trusted_score,
-		  total_signal       = EXCLUDED.total_signal,
-		  updated_at         = NOW()
-		RETURNING
-		  user_id, builder_score, thinker_score, executor_score,
-		  collaborator_score, specialist_score, trusted_score, total_signal, updated_at`,
-		userID,
-	).StructScan(&score)
-	return &score, err
-}
-
 // GetScores returns the user's current signal scores, or ErrNotFound.
 func (r *SignalRepo) GetScores(ctx context.Context, userID int64) (*domain.UserSignalScore, error) {
 	var score domain.UserSignalScore
 	err := r.db.QueryRowxContext(ctx, `
-		SELECT user_id, builder_score, thinker_score, executor_score,
-		       collaborator_score, specialist_score, trusted_score, total_signal, updated_at
-		FROM user_signal_scores WHERE user_id = $1`,
+		SELECT user_id,
+		       output_raw, output_percentile,
+		       craft_raw, craft_percentile,
+		       influence_raw, influence_percentile,
+		       collaboration_raw, collaboration_percentile,
+		       range_raw, range_percentile,
+		       trust,
+		       github_username, computed_at,
+		       scoring_status, scoring_started_at, scoring_done_at, scoring_error,
+		       updated_at
+		FROM user_signal_scores
+		WHERE user_id = $1`,
 		userID,
 	).StructScan(&score)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -124,8 +98,85 @@ func (r *SignalRepo) GetScores(ctx context.Context, userID int64) (*domain.UserS
 	return &score, err
 }
 
+// StartScoringJob atomically claims the scoring slot for a user.
+// Creates a new row or updates an existing one to status='running'.
+// Returns false without error when a non-stale run is already in progress.
+// A run is considered stale after 6 minutes (matches the 5-minute ingestion timeout
+// plus a 1-minute buffer), so a crashed server can never orphan-lock a user.
+func (r *SignalRepo) StartScoringJob(ctx context.Context, userID int64) (bool, error) {
+	var id int64
+	err := r.db.QueryRowxContext(ctx, `
+		INSERT INTO user_signal_scores (user_id, scoring_status, scoring_started_at, updated_at)
+		VALUES ($1, 'running', NOW(), NOW())
+		ON CONFLICT (user_id) DO UPDATE SET
+		    scoring_status     = 'running',
+		    scoring_started_at = NOW(),
+		    scoring_done_at    = NULL,
+		    scoring_error      = NULL,
+		    updated_at         = NOW()
+		WHERE user_signal_scores.scoring_status IS DISTINCT FROM 'running'
+		   OR user_signal_scores.scoring_started_at < NOW() - INTERVAL '6 minutes'
+		RETURNING user_id`,
+		userID,
+	).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil // blocked by an active, non-stale run
+	}
+	return err == nil, err
+}
+
+// SaveGitHubScores writes all five dimension scores, trust, and metadata, then
+// marks the scoring job done. Called by the background runScoring goroutine on success.
+func (r *SignalRepo) SaveGitHubScores(ctx context.Context, userID int64, username string, scores scoring.Scores) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE user_signal_scores SET
+		    output_raw               = $2,
+		    output_percentile        = $3,
+		    craft_raw                = $4,
+		    craft_percentile         = $5,
+		    influence_raw            = $6,
+		    influence_percentile     = $7,
+		    collaboration_raw        = $8,
+		    collaboration_percentile = $9,
+		    range_raw                = $10,
+		    range_percentile         = $11,
+		    trust                    = $12,
+		    github_username          = $13,
+		    computed_at              = $14,
+		    scoring_status           = 'done',
+		    scoring_done_at          = NOW(),
+		    scoring_error            = NULL,
+		    updated_at               = NOW()
+		WHERE user_id = $1`,
+		userID,
+		scores.Output.Raw, scores.Output.Percentile,
+		scores.Craft.Raw, scores.Craft.Percentile,
+		scores.Influence.Raw, scores.Influence.Percentile,
+		scores.Collaboration.Raw, scores.Collaboration.Percentile,
+		scores.Range.Raw, scores.Range.Percentile,
+		scores.Trust,
+		username,
+		scores.ComputedAt,
+	)
+	return err
+}
+
+// FailScoringJob marks the scoring job as failed with a reason string.
+func (r *SignalRepo) FailScoringJob(ctx context.Context, userID int64, reason string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE user_signal_scores SET
+		    scoring_status  = 'failed',
+		    scoring_done_at = NOW(),
+		    scoring_error   = $2,
+		    updated_at      = NOW()
+		WHERE user_id = $1`,
+		userID, reason,
+	)
+	return err
+}
+
 // DeleteEvidence removes an evidence item (verifying ownership) along with its
-// signal_events in a single transaction. Caller must recompute scores afterward.
+// signal_events in a single transaction.
 func (r *SignalRepo) DeleteEvidence(ctx context.Context, userID, evidenceID int64) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -133,7 +184,6 @@ func (r *SignalRepo) DeleteEvidence(ctx context.Context, userID, evidenceID int6
 	}
 	defer tx.Rollback()
 
-	// Delete signal_events first (FK is SET NULL, so we must do this explicitly).
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM signal_events WHERE evidence_item_id = $1 AND user_id = $2`,
 		evidenceID, userID,

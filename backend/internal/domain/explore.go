@@ -13,7 +13,7 @@ type ExploreEntry struct {
 	Class          *string        `db:"class"           json:"class"`
 	Subclass       *string        `db:"subclass"        json:"subclass"`
 	Headline       *string        `db:"headline"        json:"headline"`
-	TotalSignal    int            `db:"total_signal"    json:"total_signal"`
+	Trust          float64        `db:"trust"           json:"trust"`
 	GitHubUsername *string        `db:"github_username" json:"github_username"`
 	TopLanguages   pq.StringArray `db:"top_languages"   json:"top_languages"`
 	UpdatedAt      time.Time      `db:"updated_at"      json:"updated_at"`

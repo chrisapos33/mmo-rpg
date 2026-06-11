@@ -18,6 +18,7 @@ import (
 type OnboardingService struct {
 	cvRepo      *repository.CVRepo
 	profileRepo *repository.ProfileRepo
+	signalSvc   *SignalService
 	aiClient    *ai.Client
 	uploadDir   string
 	mockAI      bool
@@ -26,6 +27,7 @@ type OnboardingService struct {
 func NewOnboardingService(
 	cvRepo *repository.CVRepo,
 	profileRepo *repository.ProfileRepo,
+	signalSvc *SignalService,
 	aiClient *ai.Client,
 	uploadDir string,
 	mockAI bool,
@@ -33,6 +35,7 @@ func NewOnboardingService(
 	return &OnboardingService{
 		cvRepo:      cvRepo,
 		profileRepo: profileRepo,
+		signalSvc:   signalSvc,
 		aiClient:    aiClient,
 		uploadDir:   uploadDir,
 		mockAI:      mockAI,
@@ -72,32 +75,38 @@ func (s *OnboardingService) GetCVStatus(ctx context.Context, userID int64) (*dom
 	return s.cvRepo.LatestByUserID(ctx, userID)
 }
 
-// GenerateBuild reads the user's parsed CV data, calls Claude, and upserts the profile.
+// GenerateBuild derives a character build from GitHub-scored dimensions (primary)
+// and CV data (optional low-confidence context). GitHub scoring must be complete
+// OR a processed CV must exist — if neither is present, returns an error.
 // This call is synchronous — it blocks until the AI responds.
 func (s *OnboardingService) GenerateBuild(ctx context.Context, userID int64) (*domain.Profile, error) {
-	upload, err := s.cvRepo.LatestByUserID(ctx, userID)
+	// Primary: GitHub-derived scores. GetScores returns a zero-value row on not-found.
+	scores, err := s.signalSvc.GetScores(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("no CV found — upload and process your CV first")
+		return nil, fmt.Errorf("reading signal scores: %w", err)
 	}
-	if upload.Status != domain.CVStatusDone {
-		return nil, fmt.Errorf("CV is still being processed — try again shortly")
-	}
-	if upload.ExtractedData == nil {
-		return nil, fmt.Errorf("CV extraction data is missing")
+	hasGitHubScores := scores.ScoringStatus != nil && *scores.ScoringStatus == "done"
+
+	// Secondary: CV data (optional — nil if not uploaded or not yet processed).
+	var cvData *domain.CVData
+	if upload, err := s.cvRepo.LatestByUserID(ctx, userID); err == nil &&
+		upload.Status == domain.CVStatusDone && upload.ExtractedData != nil {
+		var parsed domain.CVData
+		if err := json.Unmarshal(*upload.ExtractedData, &parsed); err == nil {
+			cvData = &parsed
+		}
 	}
 
-	var cvData domain.CVData
-	if err := json.Unmarshal(*upload.ExtractedData, &cvData); err != nil {
-		return nil, fmt.Errorf("reading CV data: %w", err)
+	if !hasGitHubScores && cvData == nil {
+		return nil, fmt.Errorf("connect GitHub (and wait for scoring to complete) or upload a CV first")
 	}
 
 	var build *domain.BuildData
 	if s.mockAI {
 		build = mockBuild()
-		log.Printf("build_gen [user:%d]: MOCK MODE — skipping Claude", userID)
+		log.Printf("build_gen [user:%d]: MOCK MODE", userID)
 	} else {
-		var err error
-		build, err = ai.GenerateBuild(ctx, s.aiClient, &cvData)
+		build, err = ai.GenerateBuild(ctx, s.aiClient, scores, cvData)
 		if err != nil {
 			return nil, fmt.Errorf("build generation: %w", err)
 		}
@@ -107,7 +116,6 @@ func (s *OnboardingService) GenerateBuild(ctx context.Context, userID int64) (*d
 	if err != nil {
 		return nil, fmt.Errorf("saving build: %w", err)
 	}
-
 	log.Printf("build_gen [user:%d]: %s / %s", userID, build.Class, build.Subclass)
 	return profile, nil
 }

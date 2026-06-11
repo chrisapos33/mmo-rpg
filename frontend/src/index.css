@@ -1,32 +1,62 @@
 @import "tailwindcss";
 
 @theme {
-  /* Void — near-black backgrounds */
-  --color-void-950: #06080f;
-  --color-void-900: #0d1117;
-  --color-void-800: #161c28;
-  --color-void-700: #1e2636;
-  --color-void-600: #28334a;
+  /* Stone — warm dark backgrounds (replaces void) */
+  --color-void-950: #130e07;
+  --color-void-900: #1c1409;
+  --color-void-800: #2a1e0e;
+  --color-void-700: #3a2c15;
+  --color-void-600: #4e3d1f;
+  --color-void-500: #6b5432;
 
-  /* Gold — accent, XP, signal highlights */
-  --color-gold-300: #f0cb6a;
-  --color-gold-400: #d4a843;
-  --color-gold-500: #b08928;
-  --color-gold-600: #8a6a18;
+  /* Gold */
+  --color-gold-100: #fff4cc;
+  --color-gold-200: #fde27a;
+  --color-gold-300: #e8c040;
+  --color-gold-400: #c99224;
+  --color-gold-500: #a07018;
+  --color-gold-600: #7a5210;
 
-  /* Signal — reputation / positive indicators */
-  --color-signal-400: #34d399;
-  --color-signal-500: #10b981;
+  /* Bronze */
+  --color-bronze-300: #d4a855;
+  --color-bronze-400: #b48638;
+  --color-bronze-500: #8c6424;
+
+  /* Parchment */
+  --color-parchment-50:  #fdf8ed;
+  --color-parchment-100: #f5e9c8;
+  --color-parchment-200: #e8d5a3;
+
+  /* Burgundy */
+  --color-burgundy-400: #c45a70;
+  --color-burgundy-600: #8a1f34;
+  --color-burgundy-900: #2d0d14;
+
+  /* Forest */
+  --color-forest-400: #5ab870;
+  --color-forest-600: #246b38;
+  --color-forest-900: #0f2818;
+
+  /* Azure */
+  --color-azure-400: #5a90d4;
+  --color-azure-600: #204878;
+  --color-azure-900: #0d1c34;
+
+  /* Signal — positive/verified */
+  --color-signal-400: #5ab870;
+  --color-signal-500: #3d8a52;
 
   /* Danger */
-  --color-danger-400: #f87171;
+  --color-danger-400: #e06860;
 
-  /* Text */
-  --color-ink-50:  #f0f2f8;
-  --color-ink-200: #c8cee0;
-  --color-ink-400: #8892aa;
-  --color-ink-600: #4a5468;
+  /* Ink — text */
+  --color-ink-50:  #f2ece0;
+  --color-ink-100: #e5d9c3;
+  --color-ink-200: #c8bca8;
+  --color-ink-400: #8a7e6a;
+  --color-ink-600: #4a4032;
 
+  --font-fantasy: "Cinzel", "Palatino Linotype", "Book Antiqua", serif;
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -40,8 +70,8 @@ html, body, #root {
 
 body {
   margin: 0;
-  background-color: #06080f;
-  color: #f0f2f8;
+  background-color: #130e07;
+  color: #f2ece0;
   font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
@@ -63,4 +93,32 @@ body {
 @keyframes scan {
   0%   { transform: translateX(-100%); }
   100% { transform: translateX(400%); }
+}
+
+@keyframes pulse-gold {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+@keyframes rune-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes rune-spin-reverse {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(-360deg); }
+}
+
+@keyframes step-appear {
+  from { opacity: 0; transform: translateX(-10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.animate-rune-spin         { animation: rune-spin 10s linear infinite; }
+.animate-rune-spin-reverse { animation: rune-spin-reverse 16s linear infinite; }
+.animate-step-appear       { animation: step-appear 0.5s cubic-bezier(0.16,1,0.3,1) both; }
+
+.animate-pulse-gold {
+  animation: pulse-gold 2s ease-in-out infinite;
 }

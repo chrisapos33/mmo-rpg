@@ -99,17 +99,21 @@ export interface GitHubStatusResponse {
 
 // ─── Signal ──────────────────────────────────────────────────────────────────
 
-export type SignalDimension = 'builder' | 'thinker' | 'executor' | 'collaborator' | 'specialist' | 'trusted'
+export type SignalDimension = 'output' | 'craft' | 'influence' | 'collaboration' | 'range'
 
 export interface UserSignalScore {
   user_id: number
-  builder_score: number
-  thinker_score: number
-  executor_score: number
-  collaborator_score: number
-  specialist_score: number
-  trusted_score: number
-  total_signal: number
+  github_username?: string | null
+  output_percentile: number
+  craft_percentile: number
+  influence_percentile: number
+  collaboration_percentile: number
+  range_percentile: number
+  trust: number
+  scoring_status?: string | null
+  scoring_started_at?: string | null
+  scoring_done_at?: string | null
+  scoring_error?: string | null
   updated_at: string
 }
 
@@ -120,7 +124,7 @@ export interface ExploreEntry {
   class: string | null
   subclass: string | null
   headline: string | null
-  total_signal: number
+  trust: number
   github_username: string | null
   top_languages: string[]
   updated_at: string

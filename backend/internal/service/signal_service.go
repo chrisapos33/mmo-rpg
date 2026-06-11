@@ -12,6 +12,7 @@ import (
 	gh "github.com/chrisapos3/mmo-rpg/internal/github"
 	"github.com/chrisapos3/mmo-rpg/internal/domain"
 	"github.com/chrisapos3/mmo-rpg/internal/repository"
+	"github.com/chrisapos3/mmo-rpg/internal/scoring"
 )
 
 var urlVerifyClient = &http.Client{
@@ -77,10 +78,6 @@ func (s *SignalService) IngestManual(ctx context.Context, userID int64, item *do
 		if len(events) > 0 {
 			if err := s.signalRepo.ReplaceSignalEvents(ctx, saved.ID, events); err != nil {
 				log.Printf("signal [user:%d]: replace events failed: %v", userID, err)
-			} else {
-				if _, err := s.signalRepo.RecomputeScores(ctx, userID); err != nil {
-					log.Printf("signal [user:%d]: recompute failed: %v", userID, err)
-				}
 			}
 		}
 	}
@@ -88,15 +85,9 @@ func (s *SignalService) IngestManual(ctx context.Context, userID int64, item *do
 	return saved, nil
 }
 
-// RemoveEvidence deletes an evidence item (must belong to userID) and recomputes scores.
+// RemoveEvidence deletes an evidence item (must belong to userID).
 func (s *SignalService) RemoveEvidence(ctx context.Context, userID, evidenceID int64) error {
-	if err := s.signalRepo.DeleteEvidence(ctx, userID, evidenceID); err != nil {
-		return err
-	}
-	if _, err := s.signalRepo.RecomputeScores(ctx, userID); err != nil {
-		log.Printf("signal [user:%d]: recompute after delete failed: %v", userID, err)
-	}
-	return nil
+	return s.signalRepo.DeleteEvidence(ctx, userID, evidenceID)
 }
 
 // IngestGitHub converts GitHub stats into evidence + signal events and recomputes scores.
@@ -147,14 +138,23 @@ func (s *SignalService) IngestGitHub(ctx context.Context, userID int64, user *gh
 		return fmt.Errorf("replacing signal events: %w", err)
 	}
 
-	scores, err := s.signalRepo.RecomputeScores(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("recomputing scores: %w", err)
-	}
-	log.Printf("signal [user:%d]: total=%d builder=%d executor=%d specialist=%d collaborator=%d",
-		userID, scores.TotalSignal, scores.BuilderScore, scores.ExecutorScore,
-		scores.SpecialistScore, scores.CollaboratorScore)
 	return nil
+}
+
+// StartScoringJob atomically claims the scoring slot in the DB.
+// Returns false (without error) when a non-stale run is already in progress.
+func (s *SignalService) StartScoringJob(ctx context.Context, userID int64) (bool, error) {
+	return s.signalRepo.StartScoringJob(ctx, userID)
+}
+
+// SaveGitHubScores persists all five dimension scores + trust and marks the job done.
+func (s *SignalService) SaveGitHubScores(ctx context.Context, userID int64, username string, scores scoring.Scores) error {
+	return s.signalRepo.SaveGitHubScores(ctx, userID, username, scores)
+}
+
+// FailScoringJob records the error and marks the scoring job failed.
+func (s *SignalService) FailScoringJob(ctx context.Context, userID int64, reason string) error {
+	return s.signalRepo.FailScoringJob(ctx, userID, reason)
 }
 
 // ─── Computation ─────────────────────────────────────────────────────────────

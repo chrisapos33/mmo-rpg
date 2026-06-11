@@ -101,7 +101,7 @@ func (r *ProfileRepo) ListPublished(ctx context.Context, class, sort string, lim
 		  p.class,
 		  p.subclass,
 		  p.headline,
-		  COALESCE(s.total_signal, 0)    AS total_signal,
+		  COALESCE(s.trust, 0)           AS trust,
 		  gc.github_username,
 		  COALESCE(gc.top_languages, '{}') AS top_languages,
 		  p.updated_at
@@ -118,7 +118,7 @@ func (r *ProfileRepo) ListPublished(ctx context.Context, class, sort string, lim
 	}
 
 	if sort == "signal" {
-		q += " ORDER BY total_signal DESC, p.updated_at DESC"
+		q += " ORDER BY trust DESC, p.updated_at DESC"
 	} else {
 		q += " ORDER BY p.updated_at DESC"
 	}

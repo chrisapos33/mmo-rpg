@@ -1,13 +1,12 @@
 import type { UserSignalScore, SignalDimension } from '../../types'
 
-// Dimensions in clockwise order from top — adjacent ones are conceptually related.
+// Dimensions in clockwise order from top.
 const DIMENSIONS: { key: SignalDimension; label: string; description: string }[] = [
-  { key: 'builder',      label: 'Builder',      description: 'Creates, ships, contributes' },
-  { key: 'executor',     label: 'Executor',     description: 'Consistency, completion, reliability' },
-  { key: 'specialist',   label: 'Specialist',   description: 'Depth in domain, tool, or stack' },
-  { key: 'trusted',      label: 'Trusted',      description: 'Verified credibility and endorsements' },
-  { key: 'collaborator', label: 'Collaborator', description: 'Peer and community contribution' },
-  { key: 'thinker',      label: 'Thinker',      description: 'Writes, analyzes, explains' },
+  { key: 'output',        label: 'Output',    description: 'Active shipping on validated repos' },
+  { key: 'craft',         label: 'Craft',     description: 'Tests, CI, review depth, longevity' },
+  { key: 'influence',     label: 'Influence', description: 'Dependents, stars, forks from others' },
+  { key: 'collaboration', label: 'Collab',    description: 'External merged PRs and reviews' },
+  { key: 'range',         label: 'Range',     description: 'Validated breadth across stacks' },
 ]
 
 const N = DIMENSIONS.length
@@ -27,7 +26,7 @@ function axisAngle(i: number) {
 }
 
 function scoreForDim(scores: UserSignalScore, dim: SignalDimension): number {
-  const key = `${dim}_score` as keyof UserSignalScore
+  const key = `${dim}_percentile` as keyof UserSignalScore
   return (scores[key] as number) ?? 0
 }
 
@@ -56,14 +55,14 @@ export function SignalRadar({ scores }: Props) {
   const labelPositions = DIMENSIONS.map(({ label, description }, i) => {
     const angle = axisAngle(i)
     const [x, y] = polarToCart(angle, R + 22)
-    const anchor = angle < 10 || angle > 350 ? 'middle'
+    const anchor: 'start' | 'end' | 'middle' = angle < 10 || angle > 350 ? 'middle'
       : angle < 190 ? 'start'
       : angle > 190 ? 'end'
       : 'middle'
     return { x, y, label, description, anchor }
   })
 
-  const totalSignal = scores.total_signal ?? 0
+  const trustPct = Math.round((scores.trust ?? 0) * 100)
 
   return (
     <div className="flex flex-col lg:flex-row items-center gap-8 lg:gap-12">
@@ -143,8 +142,8 @@ export function SignalRadar({ scores }: Props) {
       {/* Dimension breakdown list */}
       <div className="flex-1 w-full space-y-3">
         <div className="flex items-baseline justify-between mb-5">
-          <span className="text-xs text-gold-400 tracking-[0.25em] uppercase">Total Signal</span>
-          <span className="text-3xl font-bold text-ink-50 tabular-nums">{totalSignal}</span>
+          <span className="text-xs text-gold-400 tracking-[0.25em] uppercase">Trust</span>
+          <span className="text-3xl font-bold text-ink-50 tabular-nums">{trustPct}%</span>
         </div>
 
         {DIMENSIONS.map(({ key, label, description }) => {

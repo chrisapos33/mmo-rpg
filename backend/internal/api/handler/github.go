@@ -80,3 +80,25 @@ func (h *GitHubHandler) Sync(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, conn)
 }
+
+// ScoringStatus returns the current state of the background scoring job.
+// Poll this after connecting or syncing GitHub to know when scores are ready.
+// Returns {"status":"idle"} if no scoring job has ever been started for the user.
+func (h *GitHubHandler) ScoringStatus(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+	scores, err := h.gh.ScoringStatus(r.Context(), user.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to fetch scoring status")
+		return
+	}
+	if scores.ScoringStatus == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"status": "idle"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":     *scores.ScoringStatus,
+		"started_at": scores.ScoringStartedAt,
+		"done_at":    scores.ScoringDoneAt,
+		"error":      scores.ScoringError,
+	})
+}

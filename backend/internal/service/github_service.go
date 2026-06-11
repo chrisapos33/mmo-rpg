@@ -13,15 +13,18 @@ import (
 	gh "github.com/chrisapos3/mmo-rpg/internal/github"
 	"github.com/chrisapos3/mmo-rpg/internal/domain"
 	"github.com/chrisapos3/mmo-rpg/internal/repository"
+	"github.com/chrisapos3/mmo-rpg/internal/scoring"
 )
 
 type GitHubService struct {
-	ghRepo     *repository.GitHubRepo
-	signalSvc  *SignalService
-	clientID    string
+	ghRepo       *repository.GitHubRepo
+	signalSvc    *SignalService
+	clientID     string
 	clientSecret string
 	redirectURL  string
 	frontendURL  string
+	mockGitHub   bool
+
 	// In-memory state store for OAuth CSRF protection.
 	// Each entry has a 10-minute TTL; cleaned up lazily on read.
 	states sync.Map // string → oauthState
@@ -36,6 +39,7 @@ func NewGitHubService(
 	ghRepo *repository.GitHubRepo,
 	signalSvc *SignalService,
 	clientID, clientSecret, redirectURL, frontendURL string,
+	mockGitHub bool,
 ) *GitHubService {
 	return &GitHubService{
 		ghRepo:       ghRepo,
@@ -44,6 +48,7 @@ func NewGitHubService(
 		clientSecret: clientSecret,
 		redirectURL:  redirectURL,
 		frontendURL:  frontendURL,
+		mockGitHub:   mockGitHub,
 	}
 }
 
@@ -67,6 +72,7 @@ func (s *GitHubService) GetAuthorizeURL(userID int64) (string, error) {
 
 // HandleCallback validates state, exchanges code, fetches GitHub data, persists connection.
 // Returns the user_id on success so the handler can redirect appropriately.
+// A background scoring job is enqueued; poll GET /api/github/scoring/status for completion.
 func (s *GitHubService) HandleCallback(ctx context.Context, code, state string) (int64, error) {
 	userID, err := s.consumeState(state)
 	if err != nil {
@@ -116,6 +122,7 @@ func (s *GitHubService) HandleCallback(ctx context.Context, code, state string) 
 	log.Printf("github_callback [user:%d]: connected @%s — %d repos, %d stars",
 		userID, user.Login, user.PublicRepos, stats.TotalStars)
 
+	s.enqueueScoring(userID, token)
 	return userID, nil
 }
 
@@ -152,8 +159,85 @@ func (s *GitHubService) Sync(ctx context.Context, userID int64) (*domain.GitHubC
 	if err := s.signalSvc.IngestGitHub(ctx, userID, user, stats); err != nil {
 		log.Printf("github_sync [user:%d]: signal ingest failed (non-fatal): %v", userID, err)
 	}
+
+	s.enqueueScoring(userID, conn.AccessToken)
 	return updated, nil
 }
+
+// ScoringStatus returns the DB row for the user's signal scores, which includes
+// the scoring job lifecycle fields (status, started_at, done_at, error).
+// Returns a zero-value row (ScoringStatus == nil) when no job has ever run.
+func (s *GitHubService) ScoringStatus(ctx context.Context, userID int64) (*domain.UserSignalScore, error) {
+	return s.signalSvc.GetScores(ctx, userID)
+}
+
+// ─── Background scoring ───────────────────────────────────────────────────────
+
+// enqueueScoring atomically claims the DB scoring slot then starts the goroutine.
+// Skips silently when a non-stale run is already in progress.
+func (s *GitHubService) enqueueScoring(userID int64, token string) {
+	started, err := s.signalSvc.StartScoringJob(context.Background(), userID)
+	if err != nil {
+		log.Printf("scoring [user:%d]: failed to start job: %v", userID, err)
+		return
+	}
+	if !started {
+		log.Printf("scoring [user:%d]: already running, skipping duplicate enqueue", userID)
+		return
+	}
+	go s.runScoring(userID, token)
+}
+
+// runScoring executes the full ingestion→scoring pipeline in the background.
+// Uses a detached context so HTTP request cancellation does not abort it.
+// Panics are recovered and persisted to the DB so the server stays up.
+func (s *GitHubService) runScoring(userID int64, token string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("scoring [user:%d]: panic recovered: %v", userID, r)
+			if err := s.signalSvc.FailScoringJob(context.Background(), userID, fmt.Sprintf("panic: %v", r)); err != nil {
+				log.Printf("scoring [user:%d]: failed to record panic: %v", userID, err)
+			}
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	src := s.sourceFor(token)
+	input, err := gh.Ingest(ctx, src)
+	if err != nil {
+		log.Printf("scoring [user:%d]: ingest failed: %v", userID, err)
+		if ferr := s.signalSvc.FailScoringJob(context.Background(), userID, err.Error()); ferr != nil {
+			log.Printf("scoring [user:%d]: failed to record failure: %v", userID, ferr)
+		}
+		return
+	}
+
+	scores := scoring.Compute(input)
+	log.Printf("scoring [user:%d @%s]: output=%.0f craft=%.0f influence=%.0f collab=%.0f range=%.0f trust=%.2f",
+		userID, input.Username,
+		scores.Output.Percentile, scores.Craft.Percentile,
+		scores.Influence.Percentile, scores.Collaboration.Percentile,
+		scores.Range.Percentile, scores.Trust)
+
+	if err := s.signalSvc.SaveGitHubScores(context.Background(), userID, input.Username, scores); err != nil {
+		log.Printf("scoring [user:%d]: failed to save scores: %v", userID, err)
+		if ferr := s.signalSvc.FailScoringJob(context.Background(), userID, err.Error()); ferr != nil {
+			log.Printf("scoring [user:%d]: failed to record save failure: %v", userID, ferr)
+		}
+	}
+}
+
+// sourceFor returns the appropriate GitHubSource based on whether mock mode is enabled.
+func (s *GitHubService) sourceFor(token string) gh.GitHubSource {
+	if s.mockGitHub {
+		return gh.NewMockGitHubSource()
+	}
+	return gh.NewLiveGitHubSource(token)
+}
+
+// ─── OAuth state ─────────────────────────────────────────────────────────────
 
 // consumeState validates and removes an OAuth state from the in-memory store.
 func (s *GitHubService) consumeState(state string) (int64, error) {
